@@ -1,0 +1,40 @@
+node_modules/
+.expo/
+dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# Native
+android/app/build/
+android/build/
+android/.gradle/
+android/.idea/
+android/local.properties
+ios/Pods/
+ios/build/
+windows/build/
+windows/.vs/
+windows/{ProjectName}.sdf
+windows/{ProjectName}.suo
+windows/{ProjectName}.user
+windows/{ProjectName}/Generated Files/
+
+# Metro
+.metro-health-check*
+
+# Misc
+.DS_Store
+*.log
+.env
+.env.local
+*.tsbuildinfo
+coverage/
+.expo/
+.expo-shared/
+

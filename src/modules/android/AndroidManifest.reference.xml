@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AndroidManifest.xml 参考片段
+  将以下内容合并到 android/app/src/main/AndroidManifest.xml 中
+
+  完整原生工程可通过以下命令生成：
+    npx @react-native-community/cli@latest init ScroffScreen --version 0.76.5 --pm pnpm --skip-install
+    cd ScroffScreen
+    # 然后将本项目 src/、App.tsx、index.js、package.json 合并过去
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.scroff.screen">
+
+    <!-- 屏幕控制所需权限 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.DEVICE_POWER" />
+    <!-- 锁屏控制（部分设备需要） -->
+    <uses-permission android:name="android.permission.SHUTDOWN" />
+
+    <!-- 设备管理员策略（用于锁屏） -->
+    <receiver
+        android:name=".ScreenAdminReceiver"
+        android:permission="android.permission.BIND_DEVICE_ADMIN">
+        <meta-data
+            android:name="android.app.device_admin"
+            android:resource="@xml/device_admin_policy" />
+        <intent-filter>
+            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+        </intent-filter>
+    </receiver>
+
+    <application
+        android:name=".MainApplication"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground Service：保活定时器 -->
+        <service
+            android:name=".SchedulerForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+    </application>
+</manifest>
