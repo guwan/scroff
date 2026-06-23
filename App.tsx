@@ -3,7 +3,7 @@
  * Native 平台：从 index.js 加载
  * Web 平台：从 index.web.js 加载
  *
- *  - web：使用 react-native-web + Tailwind CDN（CSS 由 HTML 加载）
+ *  - web：使用 react-native-web + NativeWind（CSS 由 webpack/PostCSS 构建）
  *  - native：使用 NativeWind（CSS 在 index.js 顶层 require）
  */
 import React from 'react';

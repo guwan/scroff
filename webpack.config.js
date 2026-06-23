@@ -18,7 +18,7 @@ module.exports = (env, argv) => {
     output: {
       path: path.resolve(__dirname, 'web/dist'),
       filename: 'bundle.js',
-      publicPath: '/',
+      publicPath: isDev ? '/' : './',
       clean: true,
     },
     resolve: {
