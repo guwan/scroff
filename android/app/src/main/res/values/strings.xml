@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Scroff</string>
+    <string name="schedule_screen_off">关闭屏幕</string>
+    <string name="schedule_screen_on">打开屏幕</string>
+    <string name="add_schedule">添加定时任务</string>
+    <string name="empty_hint">暂无定时任务</string>
+    <string name="accessibility_service_description">Scroff 屏幕定时控制服务，用于在定时任务触发时执行锁屏（关闭屏幕）和唤醒屏幕操作。</string>
+</resources>
