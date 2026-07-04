@@ -1,3 +1,9 @@
+# =============================================================
+# Scroff Server - 公共配置（提交到 Git）
+# 敏感配置请用环境变量或 application-local.yml（被 .gitignore 忽略）
+# 占位符语法：${VAR_NAME:default_value}，未设置时用默认值
+# =============================================================
+
 server:
   port: 8080
   servlet:
@@ -8,9 +14,11 @@ spring:
     name: scroff-server
 
   datasource:
-    url: jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-    username: scroff
-    password: scroff_pwd
+    # 数据库连接 —— 密码等敏感信息请通过环境变量注入
+    # 或在本目录创建 application-local.yml 覆盖（已被 .gitignore 忽略）
+    url: ${DB_URL:jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai}
+    username: ${DB_USER:scroff}
+    password: ${DB_PASSWORD:}
     driver-class-name: org.mariadb.jdbc.Driver
     hikari:
       maximum-pool-size: 10
@@ -38,9 +46,9 @@ spring:
 scroff:
   adb:
     # adb 可执行文件路径。Linux 默认 /usr/bin/adb；Windows 开发时需指定
-    executable: /usr/bin/adb
+    executable: ${ADB_EXECUTABLE:/usr/bin/adb}
     # 启动时是否自动连接所有 enabled 设备
-    auto-connect-on-startup: true
+    auto-connect-on-startup: ${ADB_AUTO_CONNECT:true}
     # 心跳检测间隔（秒）
     heartbeat-interval: 30
     # 单条 adb 命令超时（毫秒）

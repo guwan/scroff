@@ -121,6 +121,12 @@ if (Test-Path $deploySrc) {
     Copy-Item $deploySrc (Join-Path $outDir 'deploy-ubuntu.sh') -Force
 }
 
+# Sync systemd unit file (for manual install path)
+$unitSrc = Join-Path $ServerDir 'deploy\scroff-server.service'
+if (Test-Path $unitSrc) {
+    Copy-Item $unitSrc (Join-Path $outDir 'scroff-server.service') -Force
+}
+
 # Calculate jar size
 $jarBytes = (Get-Item $destJar).Length
 $jarSizeMB = [math]::Round($jarBytes / 1048576, 2)
@@ -135,6 +141,7 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host $jarLine -ForegroundColor Green
 Write-Host "  [OK] application.yml" -ForegroundColor Green
 Write-Host "  [OK] deploy-ubuntu.sh" -ForegroundColor Green
+Write-Host "  [OK] scroff-server.service" -ForegroundColor Green
 Write-Host ""
 Write-Host ("Output dir: " + $outPath) -ForegroundColor Green
 Write-Host ""

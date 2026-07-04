@@ -1,0 +1,28 @@
+# =============================================================
+# Scroff Server - 本地开发配置模板
+# =============================================================
+# 用法：
+#   1. 复制本文件为 application-local.yml（注意：去掉 .example 后缀）
+#        cp application-local.yml.example application-local.yml
+#   2. 填入你本地的真实配置（数据库密码、ADB 路径等）
+#   3. 用 scripts/run-local.sh 或 scripts/run-local.bat 启动
+#
+# ⚠️ application-local.yml 已被 .gitignore 忽略，不会被提交
+# ⚠️ 不要把真实密码提交到 Git（包括 .example 文件里也别写真密码）
+# =============================================================
+
+spring:
+  datasource:
+    # 本地数据库连接 —— 改成你的实际密码
+    url: jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: scroff
+    password: YOUR_LOCAL_DB_PASSWORD        # ← 改成你的本地 MariaDB 密码
+    driver-class-name: org.mariadb.jdbc.Driver
+
+scroff:
+  adb:
+    # Windows 本地开发要指向 android-tools 的 adb.exe，例如：
+    #   executable: C:\Users\you\AppData\Local\Android\Sdk\platform-tools\adb.exe
+    # Mac / Linux 默认 /usr/bin/adb 或 /opt/homebrew/bin/adb 即可
+    executable: /usr/bin/adb
+    auto-connect-on-startup: true

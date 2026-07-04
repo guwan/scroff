@@ -34,14 +34,14 @@
 ## 3. 一键安装
 
 ```bash
-# 在项目根目录，把 scroff-server.jar 和 application.yml 拷到当前目录
-scp scroff-server.jar application.yml user@server:/tmp/
+# 在项目根目录，把产物拷到服务器 /tmp
+scp scroff-server.jar application.yml deploy-ubuntu.sh scroff-server.service user@server:/tmp/
 
 # SSH 到服务器后
-sudo bash deploy-ubuntu.sh
+sudo bash /tmp/deploy-ubuntu.sh
 ```
 
-脚本会自动完成：装包 → 建库 → 部署 jar → 注册 systemd → 启动服务。
+脚本会自动完成：装包 → 建库 → 生成 `scroff-server.env`（含数据库密码，不进 Git）→ 部署 jar → 注册 systemd → 启动服务。
 
 ## 4. 手工安装
 
@@ -66,8 +66,6 @@ FLUSH PRIVILEGES;
 SQL
 ```
 
-修改 `application.yml` 里的 `spring.datasource.username/password`。
-
 ### 4.3 部署 jar
 
 ```bash
@@ -77,7 +75,19 @@ sudo useradd -r -s /bin/false scroff
 sudo chown -R scroff:scroff /opt/scroff-server
 ```
 
-### 4.4 注册 systemd
+### 4.4 写入敏感配置
+
+```bash
+# /opt/scroff-server/scroff-server.env  —— 此文件不进 Git
+sudo tee /opt/scroff-server/scroff-server.env > /dev/null <<'ENV'
+SPRING_PROFILES_ACTIVE=prod
+SPRING_DATASOURCE_PASSWORD=改成强密码
+ENV
+sudo chmod 600 /opt/scroff-server/scroff-server.env
+sudo chown scroff:scroff /opt/scroff-server/scroff-server.env
+```
+
+### 4.5 注册 systemd
 
 ```bash
 sudo cp scroff-server.service /etc/systemd/system/
@@ -86,7 +96,7 @@ sudo systemctl enable --now scroff-server
 sudo systemctl status scroff-server
 ```
 
-### 4.5 验证
+### 4.6 验证
 
 ```bash
 curl http://127.0.0.1:8080/
@@ -190,3 +200,50 @@ sudo systemctl start scroff-server
 ```
 
 数据库 schema 由 JPA 自动管理（`ddl-auto: update`），新增字段不会丢数据。
+
+> 注意：升级只需替换 `scroff-server.jar`，**不要删 `scroff-server.env`**，那里面存着数据库密码和 profile。
+
+## 11. 配置管理（敏感信息处理）
+
+项目公开在 Git 上，所以分了三层配置：
+
+| 位置 | 提交到 Git？ | 内容 |
+|------|------|------|
+| `src/main/resources/application.yml` | ✅ 提交 | 端口、JPA、Thymeleaf、占位符形式的默认值（`${DB_PASSWORD:}`） |
+| `src/main/resources/application-local.yml.example` | ✅ 提交 | 本地开发模板（占位符 `YOUR_LOCAL_DB_PASSWORD`） |
+| `src/main/resources/application-local.yml` | ❌ 忽略 | 本地开发真实配置 |
+| `/opt/scroff-server/scroff-server.env` | ❌ 部署时生成 | 生产环境敏感配置（DB 密码、profile） |
+
+**生产环境**用 systemd `EnvironmentFile` 注入敏感值（见 §4.4）：
+- 启动时 Spring Boot 自动把 `SPRING_DATASOURCE_PASSWORD` 映射到 `spring.datasource.password`
+- 默认 profile = `prod`
+
+**轮换数据库密码**：
+
+```bash
+# 1. 改 env 文件
+sudo nano /opt/scroff-server/scroff-server.env
+#    SPRING_DATASOURCE_PASSWORD=新密码
+
+# 2. 同步改 MySQL 用户密码
+sudo mysql -uroot -e "ALTER USER 'scroff'@'localhost' IDENTIFIED BY '新密码';"
+
+# 3. 重启服务
+sudo systemctl restart scroff-server
+```
+
+## 12. 本地开发（Windows / macOS / Linux）
+
+```bash
+# 第一次启动
+cd scroff-server
+./scripts/run-local.sh          # Linux/macOS
+scripts\run-local.bat           # Windows
+```
+
+脚本会：
+1. 检查 `application-local.yml` 是否存在，没有就从 `.example` 复制一份
+2. 检查 `YOUR_LOCAL_DB_PASSWORD` 占位符是否还在，是就退出让你改
+3. 执行 `./gradlew bootRun -Dspring.profiles.active=local`
+
+> 提示：原来的 `./gradlew bootRun` 也能跑，但默认会连 `application.yml` 里的空密码，连接会失败。请用 `scripts/run-local.*` 启动。

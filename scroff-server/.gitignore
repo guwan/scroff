@@ -42,8 +42,14 @@ logs/
 *.swp
 
 # 本地配置（数据库密码、密钥等敏感信息）
+# 模板 application-local.yml.example 会被提交；真实配置 application-local.yml 不提交
 application-local.yml
 application-local.properties
 application.yml.local
 application.properties.local
 local.properties
+# 例外：保留所有 .example 模板文件（不忽略）
+# 注意：必须显式列出每个 .example 文件，子目录 .gitignore 中通配符 !*.example 不会回退到子目录之外
+!application-local.yml.example
+!application-prod.yml.example
+
