@@ -1,0 +1,23 @@
+[Unit]
+Description=Scroff Server - ADB-based screen controller
+After=network.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+User=scroff
+WorkingDirectory=/opt/scroff-server
+ExecStart=/usr/bin/java -jar /opt/scroff-server/scroff-server.jar --spring.config.location=/opt/scroff-server/application.yml
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/scroff-server.log
+StandardError=append:/var/log/scroff-server.err.log
+Environment=JAVA_OPTS=-Xms256m -Xmx512m
+
+# 安全加固（可选）
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ReadWritePaths=/opt/scroff-server /var/log
+
+[Install]
+WantedBy=multi-user.target

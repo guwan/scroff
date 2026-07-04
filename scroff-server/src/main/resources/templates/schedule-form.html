@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{_layout :: head(${schedule != null} ? '编辑定时' : '新建定时')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('schedules')}"></nav>
+
+<main class="container narrow">
+    <h1 th:text="${schedule != null} ? '编辑定时任务' : '新建定时任务'">定时</h1>
+
+    <form method="post"
+          th:action="${schedule != null} ? @{'/schedules/' + ${schedule.id}} : @{/schedules}"
+          th:object="${form}" class="form">
+        <div class="field">
+            <label>名称 *</label>
+            <input type="text" th:field="*{name}" required>
+            <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}"></div>
+        </div>
+        <div class="field">
+            <label>设备 *</label>
+            <select th:field="*{deviceId}" required>
+                <option value="">-- 请选择 --</option>
+                <option th:each="d : ${devices}"
+                        th:value="${d.id}"
+                        th:text="${d.name + ' (' + d.address + ')'}">--</option>
+            </select>
+            <div class="err" th:if="${#fields.hasErrors('deviceId')}" th:errors="*{deviceId}"></div>
+        </div>
+        <div class="field">
+            <label>动作 *</label>
+            <select th:field="*{action}">
+                <option value="OFF">关屏</option>
+                <option value="ON">开屏</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Cron 表达式 *</label>
+            <input type="text" th:field="*{cron}" placeholder="0 0 22 * * *">
+            <small class="hint">
+                6 段格式：<b>秒 分 时 日 月 周</b>。<br>
+                示例：
+                <code>0 0 22 * * *</code> = 每天 22:00
+                &nbsp;·&nbsp;
+                <code>0 30 8 * * 1-5</code> = 工作日 08:30
+                &nbsp;·&nbsp;
+                <code>0 0 0 1 * *</code> = 每月 1 号 00:00
+            </small>
+            <div class="err" th:if="${#fields.hasErrors('cron')}" th:errors="*{cron}"></div>
+        </div>
+        <div class="field">
+            <label class="checkbox">
+                <input type="checkbox" th:field="*{enabled}"> 启用
+            </label>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" type="submit">保存</button>
+            <a class="btn" href="/schedules">取消</a>
+        </div>
+    </form>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>

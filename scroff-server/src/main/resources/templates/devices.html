@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{_layout :: head('设备')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('devices')}"></nav>
+
+<main class="container">
+    <div th:replace="~{_layout :: flash}"></div>
+
+    <div class="page-header">
+        <h1>设备</h1>
+        <a class="btn btn-primary" href="/devices/new">+ 新建设备</a>
+    </div>
+
+    <table class="table">
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>名称</th>
+            <th>位置</th>
+            <th>ADB 地址</th>
+            <th>状态</th>
+            <th>最近心跳</th>
+            <th>启用</th>
+            <th>操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="d : ${page.content}">
+            <td th:text="${d.id}">1</td>
+            <td th:text="${d.name}">--</td>
+            <td th:text="${d.location} ?: '-'" >-</td>
+            <td><code th:text="${d.address}">--</code></td>
+            <td>
+                <span th:classappend="'tag tag-' + ${#strings.toLowerCase(d.status)}"
+                      th:text="${d.status}">OFFLINE</span>
+            </td>
+            <td th:text="${d.lastSeenAt != null} ? ${#temporals.format(d.lastSeenAt,'MM-dd HH:mm:ss')} : '-'">-</td>
+            <td>
+                <span th:classappend="${d.enabled} ? 'tag tag-ok' : 'tag tag-off'"
+                      th:text="${d.enabled} ? '是' : '否'">是</span>
+            </td>
+            <td class="actions">
+                <form method="post" th:action="@{'/devices/' + ${d.id} + '/test'}" style="display:inline">
+                    <button class="btn btn-sm" type="submit">测连</button>
+                </form>
+                <form method="post" th:action="@{'/devices/' + ${d.id} + '/on'}" style="display:inline">
+                    <button class="btn btn-sm btn-ok" type="submit">开</button>
+                </form>
+                <form method="post" th:action="@{'/devices/' + ${d.id} + '/off'}" style="display:inline">
+                    <button class="btn btn-sm btn-warn" type="submit">关</button>
+                </form>
+                <a class="btn btn-sm" th:href="@{'/devices/' + ${d.id} + '/edit'}">编辑</a>
+                <form method="post" th:action="@{'/devices/' + ${d.id} + '/delete'}"
+                      style="display:inline"
+                      onsubmit="return confirm('确认删除？相关定时任务也会删除')">
+                    <button class="btn btn-sm btn-err" type="submit">删</button>
+                </form>
+            </td>
+        </tr>
+        <tr th:if="${page.content.empty}">
+            <td colspan="8" class="empty">还没有设备，<a href="/devices/new">立即新建</a></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <div class="pager" th:if="${page.totalPages > 1}">
+        <span>共 <b th:text="${page.totalElements}">0</b> 台</span>
+        <a th:if="${page.hasPrevious()}" th:href="@{/devices(page=${page.number-1})}">«</a>
+        <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
+        <a th:if="${page.hasNext()}" th:href="@{/devices(page=${page.number+1})}">»</a>
+    </div>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>

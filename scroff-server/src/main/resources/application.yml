@@ -1,0 +1,58 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: scroff-server
+
+  datasource:
+    url: jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: scroff
+    password: scroff_pwd
+    driver-class-name: org.mariadb.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+
+  jpa:
+    hibernate:
+      # 首次启动自动建表（生产可改为 none，用 schema.sql 手工建）
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MariaDBDialect
+        format_sql: true
+
+  thymeleaf:
+    cache: false          # 开发期关缓存，改模板立即生效
+    encoding: UTF-8
+    mode: HTML
+    prefix: classpath:/templates/
+    suffix: .html
+
+# 自定义 ADB 配置
+scroff:
+  adb:
+    # adb 可执行文件路径。Linux 默认 /usr/bin/adb；Windows 开发时需指定
+    executable: /usr/bin/adb
+    # 启动时是否自动连接所有 enabled 设备
+    auto-connect-on-startup: true
+    # 心跳检测间隔（秒）
+    heartbeat-interval: 30
+    # 单条 adb 命令超时（毫秒）
+    command-timeout: 10000
+    # 关屏命令模板（{on} 会被替换为 0 或 1）
+    screen-off-command: "cd /sys/kernel/debug/dispdbg && echo disp0 > name && echo blank > command && echo {param} > param && echo 1 > start"
+  schedule:
+    # 是否启动时立即把 enabled 的 schedule 注册到 TaskScheduler
+    load-on-startup: true
+
+logging:
+  level:
+    root: INFO
+    com.scroff.server: INFO
+    org.hibernate.SQL: WARN

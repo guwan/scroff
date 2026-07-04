@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<!--/* 公共布局片段：navbar + container + footer */-->
+
+<head th:fragment="head(title)">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${title} + ' · Scroff 控制台'">Scroff</title>
+    <link rel="stylesheet" href="/css/scroff.css">
+</head>
+
+<body>
+
+<nav th:fragment="navbar(active)" class="navbar">
+    <div class="nav-inner">
+        <a class="brand" href="/">📺 Scroff</a>
+        <div class="nav-links">
+            <a href="/"          th:classappend="${active=='dashboard'} ? 'active' : ''">总览</a>
+            <a href="/devices"   th:classappend="${active=='devices'}   ? 'active' : ''">设备</a>
+            <a href="/schedules" th:classappend="${active=='schedules'} ? 'active' : ''">定时</a>
+            <a href="/logs"      th:classappend="${active=='logs'}      ? 'active' : ''">日志</a>
+        </div>
+    </div>
+</nav>
+
+<div th:fragment="flash" class="container">
+    <div th:if="${msg}"  class="alert alert-ok"    th:text="${msg}"></div>
+    <div th:if="${err}"  class="alert alert-err"   th:text="${err}"></div>
+</div>
+
+<footer th:fragment="footer" class="footer">
+    <span>Scroff Server · Spring Boot + Thymeleaf + MariaDB</span>
+    <span class="muted">v1.0.0</span>
+</footer>
+
+</body>
+</html>

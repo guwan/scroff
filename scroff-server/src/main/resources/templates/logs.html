@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{_layout :: head('执行日志')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('logs')}"></nav>
+
+<main class="container">
+    <div th:replace="~{_layout :: flash}"></div>
+
+    <div class="page-header">
+        <h1>执行日志</h1>
+        <form method="get" action="/logs" class="filter">
+            <select name="deviceId" onchange="this.form.submit()">
+                <option value="">全部设备</option>
+                <option th:each="d : ${devices}"
+                        th:value="${d.id}"
+                        th:text="${d.name + ' (' + d.address + ')'}"
+                        th:selected="${selectedDeviceId != null and selectedDeviceId == d.id}">--</option>
+            </select>
+        </form>
+    </div>
+
+    <table class="table">
+        <thead>
+        <tr>
+            <th>时间</th>
+            <th>设备</th>
+            <th>动作</th>
+            <th>触发</th>
+            <th>结果</th>
+            <th>信息</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="log : ${page.content}">
+            <td th:text="${#temporals.format(log.executedAt,'yyyy-MM-dd HH:mm:ss')}">--</td>
+            <td th:text="${log.deviceName}">--</td>
+            <td>
+                <span th:classappend="${log.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"
+                      th:text="${log.action}">OFF</span>
+            </td>
+            <td th:text="${log.triggerType}">--</td>
+            <td>
+                <span th:classappend="${log.success} ? 'tag tag-ok' : 'tag tag-err'"
+                      th:text="${log.success} ? '成功' : '失败'">--</span>
+            </td>
+            <td th:text="${log.message}" class="muted">--</td>
+        </tr>
+        <tr th:if="${page.content.empty}">
+            <td colspan="6" class="empty">暂无日志</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <div class="pager" th:if="${page.totalPages > 1}">
+        <span>共 <b th:text="${page.totalElements}">0</b> 条</span>
+        <a th:if="${page.hasPrevious()}"
+           th:href="@{/logs(page=${page.number-1}, deviceId=${selectedDeviceId})}">«</a>
+        <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
+        <a th:if="${page.hasNext()}"
+           th:href="@{/logs(page=${page.number+1}, deviceId=${selectedDeviceId})}">»</a>
+    </div>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>

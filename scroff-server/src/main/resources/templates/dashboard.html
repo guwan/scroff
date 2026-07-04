@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{_layout :: head('总览')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('dashboard')}"></nav>
+
+<main class="container">
+    <div th:replace="~{_layout :: flash}"></div>
+
+    <h1>总览</h1>
+
+    <div class="cards">
+        <div class="card">
+            <div class="card-label">设备总数</div>
+            <div class="card-value" th:text="${deviceStats['total']}">0</div>
+        </div>
+        <div class="card card-ok">
+            <div class="card-label">在线</div>
+            <div class="card-value" th:text="${deviceStats['online']}">0</div>
+        </div>
+        <div class="card card-warn">
+            <div class="card-label">离线</div>
+            <div class="card-value" th:text="${deviceStats['offline']}">0</div>
+        </div>
+        <div class="card card-err">
+            <div class="card-label">异常</div>
+            <div class="card-value" th:text="${deviceStats['error']}">0</div>
+        </div>
+        <div class="card">
+            <div class="card-label">启用定时任务</div>
+            <div class="card-value" th:text="${scheduleCount}">0</div>
+        </div>
+    </div>
+
+    <h2>最近执行</h2>
+    <table class="table">
+        <thead>
+        <tr>
+            <th>时间</th>
+            <th>设备</th>
+            <th>动作</th>
+            <th>触发</th>
+            <th>结果</th>
+            <th>信息</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="log : ${recentLogs.content}">
+            <td th:text="${#temporals.format(log.executedAt,'yyyy-MM-dd HH:mm:ss')}">--</td>
+            <td th:text="${log.deviceName}">--</td>
+            <td>
+                <span th:classappend="${log.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"
+                      th:text="${log.action}">OFF</span>
+            </td>
+            <td th:text="${log.triggerType}">--</td>
+            <td>
+                <span th:classappend="${log.success} ? 'tag tag-ok' : 'tag tag-err'"
+                      th:text="${log.success} ? '成功' : '失败'">--</span>
+            </td>
+            <td th:text="${log.message}" class="muted">--</td>
+        </tr>
+        <tr th:if="${recentLogs.content.empty}">
+            <td colspan="6" class="empty">暂无日志</td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>

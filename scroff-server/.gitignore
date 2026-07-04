@@ -1,0 +1,49 @@
+# =============================================================
+# Scroff Server - .gitignore
+# =============================================================
+
+# Gradle 缓存与运行时（关键 - 否则会提交 1000+ 个缓存文件）
+.gradle/
+!**/gradle-wrapper.jar
+
+# 构建产物
+build/
+out/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志
+*.log
+logs/
+!gradle/wrapper/gradle-wrapper.jar
+
+# 临时
+*.tmp
+*.bak
+*.swp
+
+# 本地配置（数据库密码、密钥等敏感信息）
+application-local.yml
+application-local.properties
+application.yml.local
+application.properties.local
+local.properties
