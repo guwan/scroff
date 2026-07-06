@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +51,9 @@ public class DeviceController {
                        @RequestParam(defaultValue = "20") int size,
                        Model model) {
         model.addAttribute("page",
-                deviceRepo.findAll(PageRequest.of(page, size, Sort.by("id").ascending())));
+                deviceRepo.findAll(PageRequest.of(page, size,
+                        Sort.by("sortOrder").ascending()
+                            .and(Sort.by("id").ascending()))));
         return "devices";
     }
 
@@ -90,7 +93,9 @@ public class DeviceController {
         f.setHost(d.getHost());
         f.setAdbPort(d.getAdbPort());
         f.setLocation(d.getLocation());
+        f.setCategory(d.getCategory());
         f.setNotes(d.getNotes());
+        f.setSortOrder(d.getSortOrder());
         f.setEnabled(d.getEnabled());
         model.addAttribute("device", d);
         model.addAttribute("form", f);
@@ -125,8 +130,15 @@ public class DeviceController {
     @PostMapping("/{id}/test")
     public String test(@PathVariable Long id, RedirectAttributes ra) {
         deviceRepo.findById(id).ifPresent(d -> {
-            Device result = deviceManager.testConnection(d);
-            ra.addFlashAttribute("msg", "测试连接 [" + result.getName() + "] → " + result.getStatus());
+            deviceManager.testConnection(d);
+            Device fresh = deviceRepo.findById(id).orElse(d);
+            String msg = "测试连接 [" + fresh.getName() + "] → " + fresh.getStatus();
+            String err = fresh.getLastError();
+            boolean ok = fresh.getStatus() == Device.Status.ONLINE;
+            if (!ok && err != null && !err.isBlank()) {
+                msg = msg + " | " + err;
+            }
+            ra.addFlashAttribute(ok ? "msg" : "err", msg);
         });
         return "redirect:/devices";
     }
@@ -134,14 +146,16 @@ public class DeviceController {
     @PostMapping("/{id}/on")
     public String turnOn(@PathVariable Long id, RedirectAttributes ra) {
         String msg = screenPowerService.control(id, true, ScreenLog.TriggerType.MANUAL);
-        ra.addFlashAttribute(msg.contains("失败") ? "err" : "msg", msg);
+        boolean ok = !msg.contains("失败");
+        ra.addFlashAttribute(ok ? "msg" : "err", "开屏: " + msg);
         return "redirect:/devices";
     }
 
     @PostMapping("/{id}/off")
     public String turnOff(@PathVariable Long id, RedirectAttributes ra) {
         String msg = screenPowerService.control(id, false, ScreenLog.TriggerType.MANUAL);
-        ra.addFlashAttribute(msg.contains("失败") ? "err" : "msg", msg);
+        boolean ok = !msg.contains("失败");
+        ra.addFlashAttribute(ok ? "msg" : "err", "关屏: " + msg);
         return "redirect:/devices";
     }
 
@@ -150,7 +164,9 @@ public class DeviceController {
         d.setHost(f.getHost());
         d.setAdbPort(f.getAdbPort());
         d.setLocation(f.getLocation());
+        d.setCategory(f.getCategory());
         d.setNotes(f.getNotes());
+        d.setSortOrder(f.getSortOrder() != null ? f.getSortOrder() : 0);
         d.setEnabled(f.getEnabled() != null ? f.getEnabled() : Boolean.TRUE);
     }
 
@@ -167,15 +183,21 @@ public class DeviceController {
         @Size(max = 64)
         private String host;
 
-        @NotBlank
+        @NotNull
         @Min(1) @Max(65535)
         private Integer adbPort = 5555;
 
         @Size(max = 200)
         private String location;
 
+        @Size(max = 50)
+        private String category;
+
         @Size(max = 2000)
         private String notes;
+
+        @Min(0) @Max(Integer.MAX_VALUE)
+        private Integer sortOrder = 0;
 
         private Boolean enabled = Boolean.TRUE;
     }

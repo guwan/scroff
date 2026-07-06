@@ -33,13 +33,32 @@
             <input type="text" th:field="*{location}" placeholder="大厅 1 号窗口">
         </div>
         <div class="field">
+            <label>分类</label>
+            <input type="text" th:field="*{category}" list="category-options" maxlength="50" placeholder="例如：窗口机">
+            <datalist id="category-options">
+                <option value="窗口机"></option>
+                <option value="取号机"></option>
+                <option value="显示大屏"></option>
+                <option value="自助终端"></option>
+                <option value="候诊屏"></option>
+            </datalist>
+            <small class="hint">下拉为常用建议，可自由输入</small>
+        </div>
+        <div class="field">
             <label>备注</label>
             <textarea th:field="*{notes}" rows="3"></textarea>
         </div>
-        <div class="field">
-            <label class="checkbox">
-                <input type="checkbox" th:field="*{enabled}"> 启用
-            </label>
+        <div class="field-row">
+            <div class="field">
+                <label>排序</label>
+                <input type="number" th:field="*{sortOrder}" min="0" step="1">
+                <small class="hint">数字越小越靠前；不填默认 0</small>
+            </div>
+            <div class="field">
+                <label class="checkbox" style="padding-top:24px">
+                    <input type="checkbox" th:field="*{enabled}"> 启用
+                </label>
+            </div>
         </div>
         <div class="form-actions">
             <button class="btn btn-primary" type="submit">保存</button>

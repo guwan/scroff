@@ -23,7 +23,9 @@ CREATE TABLE `device` (
     `last_seen_at`  TIMESTAMP    NULL     DEFAULT NULL,
     `last_error`    VARCHAR(500)          DEFAULT NULL,
     `location`      VARCHAR(200)          DEFAULT NULL COMMENT '物理位置（窗口1/大厅）',
+    `category`      VARCHAR(50)           DEFAULT NULL COMMENT '设备分类（窗口机/取号机/大屏/自助终端等）',
     `notes`         TEXT                  DEFAULT NULL,
+    `sort_order`    INT          NOT NULL DEFAULT 0 COMMENT '排序，数字越小越靠前',
     `enabled`       TINYINT(1)   NOT NULL DEFAULT 1,
     `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -71,3 +73,16 @@ CREATE TABLE `screen_log` (
     KEY `idx_log_device_time` (`device_id`, `executed_at`),
     KEY `idx_log_time` (`executed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='屏幕控制执行日志';
+
+-- ------------------------------------------------------------
+-- system_config：系统级键值对配置（运行时可改，重启不丢）
+-- 例：scroff.adb.active-profile-id = android-sdk
+-- 列名避开 MySQL 保留字（key/value），用 cfg_key/cfg_value
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `system_config`;
+CREATE TABLE `system_config` (
+    `cfg_key`    VARCHAR(100) NOT NULL,
+    `cfg_value`  VARCHAR(500)          DEFAULT NULL,
+    `updated_at` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`cfg_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统级键值对配置（运行时可改）';

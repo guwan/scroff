@@ -43,10 +43,33 @@ spring:
     suffix: .html
 
 # 自定义 ADB 配置
+# 支持多个 adb 来源（profile），可在 /settings 页面运行时切换激活项
 scroff:
   adb:
-    # adb 可执行文件路径。Linux 默认 /usr/bin/adb；Windows 开发时需指定
-    executable: ${ADB_EXECUTABLE:/usr/bin/adb}
+    # profiles 列表。每项可指向不同来源：
+    #   - android-sdk: 本地 Android SDK 自带的 adb.exe
+    #   - wsl-ubuntu:  WSL 内的 adb（用 wsl.exe 做包装器）
+    #   - linux-default: 部署到 Linux 服务器时的默认路径
+    # 新增 profile：复制一段，改 id/name/executable 即可
+    profiles:
+      - id: linux-default
+        name: "Linux 默认 /usr/bin/adb"
+        executable: /usr/bin/adb
+        enabled: true
+      - id: wsl-ubuntu
+        name: "WSL Ubuntu adb（通过 wsl.exe 包装）"
+        executable: C:/Windows/System32/wsl.exe
+        args: ["adb"]
+        enabled: false
+      - id: android-sdk
+        name: "Android SDK (Windows)"
+        # Windows 本地开发通常在这里（Android Studio 默认）：
+        #   C:/Users/<user>/AppData/Local/Android/Sdk/platform-tools/adb.exe
+        # 也支持环境变量覆盖：
+        executable: ${ADB_EXECUTABLE_ANDROID_SDK:CHANGE_ME_ANDROID_SDK_ADB_PATH}
+        enabled: false
+    # 默认激活哪个 profile（运行时可被 web UI 覆盖，写入 system_config 表）
+    active-profile-id: linux-default
     # 启动时是否自动连接所有 enabled 设备
     auto-connect-on-startup: ${ADB_AUTO_CONNECT:true}
     # 心跳检测间隔（秒）

@@ -155,6 +155,7 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
 .tag-online  { background: #d1fae5; color: #065f46; }
 .tag-offline { background: #e5e7eb; color: #4b5563; }
 .tag-error   { background: #fee2e2; color: #991b1b; }
+.tag-cat     { background: #ede9fe; color: #5b21b6; }
 
 /* ===== Buttons ===== */
 .btn {
@@ -176,6 +177,50 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
 .btn-ok   { background: var(--c-ok);   color: white; border-color: var(--c-ok); }
 .btn-warn { background: var(--c-warn); color: white; border-color: var(--c-warn); }
 .btn-err  { background: var(--c-err);  color: white; border-color: var(--c-err); }
+.btn-default { background: #f3f4f6; color: var(--c-text); border-color: var(--c-border); }
+.btn-default:hover { background: #e5e7eb; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== Settings 页面 ===== */
+.settings-section {
+    background: var(--c-card);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+}
+.settings-section h2 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    color: var(--c-text);
+}
+.settings-section p { margin: 4px 0 12px; font-size: 13px; }
+.settings-section pre {
+    background: #f8fafc;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #334155;
+}
+.settings-section pre code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-size: 12.5px;
+}
+.settings-section .info-box {
+    background: #eff6ff;
+    border-left: 3px solid var(--c-primary);
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-top: 14px;
+}
+.settings-section .reset-form { margin-top: 14px; }
 
 /* ===== Form ===== */
 .form .field { margin-bottom: 16px; }

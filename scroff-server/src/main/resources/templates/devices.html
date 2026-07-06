@@ -18,10 +18,12 @@
         <tr>
             <th>ID</th>
             <th>名称</th>
+            <th>分类</th>
             <th>位置</th>
             <th>ADB 地址</th>
             <th>状态</th>
             <th>最近心跳</th>
+            <th>排序</th>
             <th>启用</th>
             <th>操作</th>
         </tr>
@@ -30,13 +32,21 @@
         <tr th:each="d : ${page.content}">
             <td th:text="${d.id}">1</td>
             <td th:text="${d.name}">--</td>
-            <td th:text="${d.location} ?: '-'" >-</td>
+            <td>
+                <span th:if="${d.category != null and d.category != ''}"
+                      class="tag tag-cat"
+                      th:text="${d.category}">--</span>
+                <span th:if="${d.category == null or d.category == ''}" class="muted">-</span>
+            </td>
+            <td th:text="${d.location} ?: '-'">-</td>
             <td><code th:text="${d.address}">--</code></td>
             <td>
                 <span th:classappend="'tag tag-' + ${#strings.toLowerCase(d.status)}"
-                      th:text="${d.status}">OFFLINE</span>
+                      th:text="${d.status}"
+                      th:title="${d.lastError != null and d.lastError != ''} ? ${d.lastError} : '状态正常'">OFFLINE</span>
             </td>
             <td th:text="${d.lastSeenAt != null} ? ${#temporals.format(d.lastSeenAt,'MM-dd HH:mm:ss')} : '-'">-</td>
+            <td><code th:text="${d.sortOrder}">0</code></td>
             <td>
                 <span th:classappend="${d.enabled} ? 'tag tag-ok' : 'tag tag-off'"
                       th:text="${d.enabled} ? '是' : '否'">是</span>
@@ -60,7 +70,7 @@
             </td>
         </tr>
         <tr th:if="${page.content.empty}">
-            <td colspan="8" class="empty">还没有设备，<a href="/devices/new">立即新建</a></td>
+            <td colspan="10" class="empty">还没有设备，<a href="/devices/new">立即新建</a></td>
         </tr>
         </tbody>
     </table>

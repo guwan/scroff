@@ -57,17 +57,40 @@ public class Device {
     @Column(length = 200)
     private String location;
 
+    @Column(length = 50)
+    private String category;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
+
+    @Column(name = "sort_order", nullable = false)
+    private Integer sortOrder = 0;
 
     @Column(nullable = false)
     private Boolean enabled = true;
 
-    @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * 新建时由 JPA 回调设置 created_at / updated_at。
+     * 不依赖 DB DEFAULT CURRENT_TIMESTAMP，避免 ddl-auto: update 时旧表缺 DEFAULT 报
+     * "Field 'created_at' doesn't have a default value"。
+     */
+    @PrePersist
+    void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 
     /**
      * 拼接 ADB 目标地址 host:port，供 adb -s 参数或 adb connect 用

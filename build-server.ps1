@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+﻿﻿#!/usr/bin/env pwsh
 # Scroff Server - Build Script (PowerShell + Gradle Kotlin DSL)
 # Usage (run in project root):
 #   .\build-server.ps1                # default bootJar

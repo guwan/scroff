@@ -59,9 +59,25 @@ public class Schedule {
     @Column(name = "last_run_message", length = 500)
     private String lastRunMessage;
 
-    @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * 新建时由 JPA 回调设置 created_at / updated_at。
+     * 不依赖 DB DEFAULT CURRENT_TIMESTAMP，避免 ddl-auto: update 时旧表缺 DEFAULT 报错。
+     */
+    @PrePersist
+    void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 }

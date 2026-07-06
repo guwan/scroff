@@ -26,8 +26,11 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
 
     Page<Device> findAll(Pageable pageable);
 
-    /** 快速更新心跳字段，避免加载整个实体 */
-    @Modifying
+    /**
+     * 快速更新心跳字段，避免加载整个实体。
+     * clearAutomatically=true 防止 JPA 一级缓存里残留旧值，让紧跟其后的 findById 拿到新数据。
+     */
+    @Modifying(clearAutomatically = true)
     @Query("update Device d set d.status = :status, d.lastSeenAt = :now, d.lastError = :err where d.id = :id")
     int updateStatus(@Param("id") Long id,
                      @Param("status") Device.Status status,

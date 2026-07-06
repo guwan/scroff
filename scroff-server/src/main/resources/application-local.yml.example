@@ -9,20 +9,45 @@
 #
 # ⚠️ application-local.yml 已被 .gitignore 忽略，不会被提交
 # ⚠️ 不要把真实密码提交到 Git（包括 .example 文件里也别写真密码）
+# ⚠️ 密码含特殊字符（: # & * ! | > % @ , = 等）务必用引号包裹！
+#    错误示例:  password: my:p@ss   ← 解析失败
+#    正确示例:  password: "my:p@ss" ← OK
 # =============================================================
+
+# 开启 Spring Boot debug 日志（仅在 local profile 下生效）
+# 启动后日志里会显示加载了哪些 property source，方便排查
+debug: true
 
 spring:
   datasource:
     # 本地数据库连接 —— 改成你的实际密码
     url: jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
     username: scroff
-    password: YOUR_LOCAL_DB_PASSWORD        # ← 改成你的本地 MariaDB 密码
+    password: "YOUR_LOCAL_DB_PASSWORD"   # ← 改成你的本地 MariaDB 密码，务必加引号
     driver-class-name: org.mariadb.jdbc.Driver
 
 scroff:
   adb:
-    # Windows 本地开发要指向 android-tools 的 adb.exe，例如：
-    #   executable: C:\Users\you\AppData\Local\Android\Sdk\platform-tools\adb.exe
-    # Mac / Linux 默认 /usr/bin/adb 或 /opt/homebrew/bin/adb 即可
-    executable: /usr/bin/adb
+    # ===== ADB profiles（多配置 + 运行时切换）=====
+    # 在 /settings 页面可以即时切换激活的 profile
+    profiles:
+      # Windows 上最常用：Android SDK 自带的 adb.exe
+      - id: android-sdk
+        name: "Android SDK (Windows)"
+        # ← 改成你的实际路径！用 / 或 \\ 都行，不要用单个 \
+        executable: C:/Users/your-name/AppData/Local/Android/Sdk/platform-tools/adb.exe
+        enabled: true
+      # 如果你用 WSL：把 wsl.exe 当 adb 的包装器
+      - id: wsl-ubuntu
+        name: "WSL Ubuntu adb"
+        executable: C:/Windows/System32/wsl.exe
+        args: ["adb"]   # 包装器场景需要：wsl.exe adb ...
+        enabled: false
+      # Linux 部署
+      - id: linux-default
+        name: "Linux 默认"
+        executable: /usr/bin/adb
+        enabled: false
+    # 可选：默认激活哪个（也可用 /settings 页面切换，覆盖此项）
+    active-profile-id: android-sdk
     auto-connect-on-startup: true

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{_layout :: head('设置')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('settings')}"></nav>
+
+<main class="container">
+    <div th:replace="~{_layout :: flash}"></div>
+
+    <h1>设置</h1>
+
+    <section class="settings-section">
+        <h2>ADB 配置</h2>
+        <p class="muted">
+            不同环境需要不同的 adb 可执行路径。配置多个 profile 后，可在此页面即时切换激活项，
+            选择会写入 <code>system_config</code> 表，<strong>重启不丢</strong>。
+        </p>
+
+        <table class="data-table">
+            <thead>
+            <tr>
+                <th>状态</th>
+                <th>id</th>
+                <th>名称</th>
+                <th>可执行路径</th>
+                <th>args</th>
+                <th>yaml enabled</th>
+                <th>路径可执行?</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:if="${profiles == null or profiles.isEmpty()}">
+                <td colspan="8" class="empty">未在 application.yml 配置任何 ADB profile。请先在 yaml 里添加。</td>
+            </tr>
+            <tr th:each="item : ${exists}">
+                <td>
+                    <span th:if="${active != null and item.profile.id == active.id}"
+                          class="tag tag-ok" title="当前激活">ACTIVE</span>
+                    <span th:unless="${active != null and item.profile.id == active.id}" class="muted">-</span>
+                </td>
+                <td><code th:text="${item.profile.id}">id</code></td>
+                <td th:text="${item.profile.name}">name</td>
+                <td><code th:text="${item.profile.executable}">/path/to/adb</code></td>
+                <td>
+                    <code th:if="${item.profile.args != null and !item.profile.args.isEmpty()}"
+                          th:text="${#strings.listJoin(item.profile.args, ' ')}">arg</code>
+                    <span th:unless="${item.profile.args != null and !item.profile.args.isEmpty()}" class="muted">-</span>
+                </td>
+                <td>
+                    <span th:classappend="${item.profile.enabled} ? 'tag tag-ok' : 'tag tag-off'"
+                          th:text="${item.profile.enabled} ? '是' : '否'">是</span>
+                </td>
+                <td>
+                    <span th:classappend="${item.exists} ? 'tag tag-ok' : 'tag tag-err'"
+                          th:text="${item.exists} ? '✓' : '✗'">✓</span>
+                </td>
+                <td>
+                    <form th:if="${active == null or item.profile.id != active.id}"
+                          th:action="@{/settings/activate(id=${item.profile.id})}"
+                          method="post" style="display:inline">
+                        <button type="submit" class="btn btn-primary btn-sm">启用</button>
+                    </form>
+                    <span th:if="${active != null and item.profile.id == active.id}" class="muted">使用中</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+
+        <div th:if="${active != null}" class="info-box">
+            <strong>当前激活：</strong>
+            <code th:text="${active.id}">id</code>
+            —
+            <code th:text="${active.executable}">/path/to/adb</code>
+            <span th:if="${active.args != null and !active.args.isEmpty()}">
+                <span class="muted">+ args: </span>
+                <code th:text="${#strings.listJoin(active.args, ' ')}">arg</code>
+            </span>
+        </div>
+
+        <form th:action="@{/settings/reset}" method="post" class="reset-form">
+            <button type="submit" class="btn btn-default btn-sm"
+                    th:disabled="${not (active != null and #strings.contains(active.id, 'override'))}">
+                恢复 application.yml 默认（清除 DB 覆盖）
+            </button>
+            <span class="muted" style="margin-left:0.5em">点此按钮后，下次启动会重新读 yaml 的 activeProfileId</span>
+        </form>
+    </section>
+
+    <section class="settings-section">
+        <h2>配置示例</h2>
+        <p class="muted">在 <code>application.yml</code> 或 <code>application-local.yml</code> 的 <code>scroff.adb</code> 下添加：</p>
+        <pre><code>scroff:
+  adb:
+    profiles:
+      - id: android-sdk
+        name: "Android SDK (Windows)"
+        executable: "C:/Users/your-name/AppData/Local/Android/Sdk/platform-tools/adb.exe"
+        enabled: true
+      - id: wsl-ubuntu
+        name: "WSL Ubuntu adb"
+        executable: "C:/Windows/System32/wsl.exe"
+        args: ["adb"]
+        enabled: false
+      - id: linux-server
+        name: "Linux Server"
+        executable: "/usr/bin/adb"
+        enabled: false
+    active-profile-id: android-sdk   # 可选：默认激活哪个
+    auto-connect-on-startup: true
+    heartbeat-interval: 30
+    command-timeout: 10000</code></pre>
+    </section>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>
