@@ -26,10 +26,11 @@
 | 组件 | 版本 | 说明 |
 |------|------|------|
 | OS   | Ubuntu 22.04 / 24.04 LTS | 其它 Debian 系发行版也兼容 |
-| JDK  | 17 (`openjdk-17-jdk-headless`) | Spring Boot 3.x 强制 |
-| MariaDB | 10.6+ (Ubuntu 仓库即可) | |
-| ADB  | `android-tools-adb` (apt) | |
-| 网络 | 与叫号机同子网 | |
+| JDK  | 21 (`openjdk-21-jdk-headless`) | Spring Boot 3.x 强制 |
+| MariaDB | 远程实例 | 脚本不安装、不启动、不建库 |
+| Git  | 已装 | 脚本不再安装 |
+| ADB  | `android-tools-adb` (apt 首次装) | |
+| 网络 | 与叫号机同子网，且能访问远程 mariadb | |
 
 ## 3. 一键安装
 
@@ -41,32 +42,22 @@ scp scroff-server.jar application.yml deploy-ubuntu.sh scroff-server.service use
 sudo bash /tmp/deploy-ubuntu.sh
 ```
 
-脚本会自动完成：装包 → 建库 → 生成 `scroff-server.env`（含数据库密码，不进 Git）→ 部署 jar → 注册 systemd → 启动服务。
+脚本会自动完成：装 JDK 21 + adb → 拉代码 → 构建 → 部署 jar → 注册 systemd → 启动服务。
+**不会**安装、启动、配置任何数据库。
 
 ## 4. 手工安装
 
 ### 4.1 装包
 
+> mariadb 是远程的（由运维单独管理），git 视为服务器自带。
+> 首次部署需要装的只有 JDK 21 + adb。
+
 ```bash
 sudo apt update
-sudo apt install -y openjdk-17-jdk-headless mariadb-server adb
+sudo apt install -y openjdk-21-jdk-headless android-tools-adb
 ```
 
-### 4.2 建库
-
-```bash
-sudo systemctl enable --now mariadb
-sudo mysql -uroot <<'SQL'
-CREATE DATABASE scroff
-    DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_unicode_ci;
-CREATE USER 'scroff'@'localhost' IDENTIFIED BY '改成强密码';
-GRANT ALL PRIVILEGES ON scroff.* TO 'scroff'@'localhost';
-FLUSH PRIVILEGES;
-SQL
-```
-
-### 4.3 部署 jar
+### 4.2 部署 jar
 
 ```bash
 sudo mkdir -p /opt/scroff-server
@@ -75,19 +66,41 @@ sudo useradd -r -s /bin/false scroff
 sudo chown -R scroff:scroff /opt/scroff-server
 ```
 
-### 4.4 写入敏感配置
+### 4.3 写入敏感配置（远程 mariadb 连接信息 + ADB 路径）
+
+> 重要：远程 mariadb 的地址、账号、密码全部写在这里。
+> 文件权限必须 600，systemd 启动时由 scroff 用户读取。
 
 ```bash
-# /opt/scroff-server/scroff-server.env  —— 此文件不进 Git
-sudo tee /opt/scroff-server/scroff-server.env > /dev/null <<'ENV'
-SPRING_PROFILES_ACTIVE=prod
-SPRING_DATASOURCE_PASSWORD=改成强密码
-ENV
-sudo chmod 600 /opt/scroff-server/scroff-server.env
-sudo chown scroff:scroff /opt/scroff-server/scroff-server.env
+sudo nano /opt/scroff-server/application-local.yml
 ```
 
-### 4.5 注册 systemd
+示例内容（**根据实际远程 mariadb 改**）：
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mariadb://你的mariadb-host:3306/scroff
+    username: scroff
+    password: 你的密码
+    driver-class-name: org.mariadb.jdbc.Driver
+
+scroff:
+  adb:
+    active-profile-id: default
+    profiles:
+      - id: default
+        name: Default
+        executable: /usr/bin/adb
+        enabled: true
+```
+
+```bash
+sudo chmod 600 /opt/scroff-server/application-local.yml
+sudo chown scroff:scroff /opt/scroff-server/application-local.yml
+```
+
+### 4.4 注册 systemd
 
 ```bash
 sudo cp scroff-server.service /etc/systemd/system/
@@ -96,7 +109,7 @@ sudo systemctl enable --now scroff-server
 sudo systemctl status scroff-server
 ```
 
-### 4.6 验证
+### 4.5 验证
 
 ```bash
 curl http://127.0.0.1:8080/
@@ -201,7 +214,7 @@ sudo systemctl start scroff-server
 
 数据库 schema 由 JPA 自动管理（`ddl-auto: update`），新增字段不会丢数据。
 
-> 注意：升级只需替换 `scroff-server.jar`，**不要删 `scroff-server.env`**，那里面存着数据库密码和 profile。
+> 注意：升级只需替换 `scroff-server.jar`，**不要删 `application-local.yml`**，那里面存着远程 mariadb 的地址/账号/密码。
 
 ## 11. 配置管理（敏感信息处理）
 
@@ -210,23 +223,22 @@ sudo systemctl start scroff-server
 | 位置 | 提交到 Git？ | 内容 |
 |------|------|------|
 | `src/main/resources/application.yml` | ✅ 提交 | 端口、JPA、Thymeleaf、占位符形式的默认值（`${DB_PASSWORD:}`） |
-| `src/main/resources/application-local.yml.example` | ✅ 提交 | 本地开发模板（占位符 `YOUR_LOCAL_DB_PASSWORD`） |
+| `src/main/resources/application-local.yml.example` | ✅ 提交 | 本地开发 + 部署模板（占位符 `YOUR_LOCAL_DB_PASSWORD`） |
 | `src/main/resources/application-local.yml` | ❌ 忽略 | 本地开发真实配置 |
-| `/opt/scroff-server/scroff-server.env` | ❌ 部署时生成 | 生产环境敏感配置（DB 密码、profile） |
+| `/opt/scroff-server/application-local.yml` | ❌ 部署时生成 | 生产环境敏感配置（**远程 mariadb 地址/账号/密码**、ADB 路径） |
 
-**生产环境**用 systemd `EnvironmentFile` 注入敏感值（见 §4.4）：
-- 启动时 Spring Boot 自动把 `SPRING_DATASOURCE_PASSWORD` 映射到 `spring.datasource.password`
-- 默认 profile = `prod`
+**生产环境**用 `application-local.yml` 直接写敏感值（`chmod 600`），systemd 启动时由 scroff 用户读取，profile = `local`。
 
-**轮换数据库密码**：
+**轮换远程数据库密码**：
 
 ```bash
-# 1. 改 env 文件
-sudo nano /opt/scroff-server/scroff-server.env
-#    SPRING_DATASOURCE_PASSWORD=新密码
+# 1. 改 application-local.yml
+sudo nano /opt/scroff-server/application-local.yml
+#    spring.datasource.password=新密码
+#    spring.datasource.url=jdbc:mariadb://远程地址:3306/scroff
 
-# 2. 同步改 MySQL 用户密码
-sudo mysql -uroot -e "ALTER USER 'scroff'@'localhost' IDENTIFIED BY '新密码';"
+# 2. 同步改远程 mariadb 的用户密码
+mysql -h远程地址 -uadmin -p -e "ALTER USER 'scroff'@'%' IDENTIFIED BY '新密码';"
 
 # 3. 重启服务
 sudo systemctl restart scroff-server

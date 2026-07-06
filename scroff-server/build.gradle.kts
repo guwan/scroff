@@ -1,6 +1,6 @@
 // =====================================================================
 // Scroff Server - Build Script (Kotlin DSL)
-// Spring Boot 3.3.5 + Java 17 + Thymeleaf + JPA + MariaDB
+// Spring Boot 3.3.5 + Java 21 + Thymeleaf + JPA + MariaDB
 // =====================================================================
 
 plugins {
@@ -14,7 +14,7 @@ version = "1.0.0"
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
+        languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
 

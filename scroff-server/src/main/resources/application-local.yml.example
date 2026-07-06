@@ -1,11 +1,10 @@
 # =============================================================
-# Scroff Server - 本地开发配置模板
+# Scroff Server - 本地开发 + 部署配置模板
 # =============================================================
 # 用法：
-#   1. 复制本文件为 application-local.yml（注意：去掉 .example 后缀）
-#        cp application-local.yml.example application-local.yml
-#   2. 填入你本地的真实配置（数据库密码、ADB 路径等）
-#   3. 用 scripts/run-local.sh 或 scripts/run-local.bat 启动
+#   本地开发：cp application-local.yml.example application-local.yml
+#   部署到 Ubuntu：脚本会从 .example 复制到 /opt/scroff-server/application-local.yml
+#   填入真实配置（数据库连接、ADB 路径等）即可
 #
 # ⚠️ application-local.yml 已被 .gitignore 忽略，不会被提交
 # ⚠️ 不要把真实密码提交到 Git（包括 .example 文件里也别写真密码）
@@ -20,10 +19,12 @@ debug: true
 
 spring:
   datasource:
-    # 本地数据库连接 —— 改成你的实际密码
+    # 数据库连接 —— 改成你的实际地址和密码
+    # 本地开发示例：jdbc:mariadb://127.0.0.1:3306/scroff
+    # 部署到 Ubuntu 远程 DB 示例：jdbc:mariadb://192.168.x.x:3306/scroff
     url: jdbc:mariadb://127.0.0.1:3306/scroff?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
     username: scroff
-    password: "YOUR_LOCAL_DB_PASSWORD"   # ← 改成你的本地 MariaDB 密码，务必加引号
+    password: "YOUR_LOCAL_DB_PASSWORD"   # ← 改成你的真实 DB 密码，务必加引号
     driver-class-name: org.mariadb.jdbc.Driver
 
 scroff:

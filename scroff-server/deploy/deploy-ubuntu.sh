@@ -2,9 +2,16 @@
 # =============================================================
 # Scroff Server - 部署脚本（Ubuntu 22.04 / 24.04）
 # =============================================================
-# 首次运行：装包 → 建库 → 建用户 → 拉代码 → 构建 → 注册 systemd → 启动
+# 前置（已装）：mariadb-server（远程的，不在本机）、git
+# 本脚本首次会装：openjdk-21-jdk-headless、adb、curl、ca-certificates
+#
+# 数据库说明：
+#   本脚本不会安装、启动、建库。
+#   远程 mariadb 由运维单独管理，连接信息写到 application-local.yml。
+#
+# 首次运行：装包 → 建用户 → 拉代码 → 构建 → 注册 systemd → 启动
 # 再次运行：拉最新代码 → 构建 → 停旧服务 → 部署新 jar → 启动新服务
-# 再次运行不会重建库、不会重装包，安全可重复
+# 再次运行不会重装包，安全可重复
 #
 # 配置策略：
 #   - 公共配置 application.yml 由脚本从 git 拉取 + 部署
@@ -17,7 +24,6 @@
 # 自定义参数（可选）：
 #   SCROFF_GIT_REPO=https://github.com/yourname/scroff.git sudo bash deploy-ubuntu.sh
 #   SCROFF_GIT_BRANCH=develop sudo bash deploy-ubuntu.sh
-#   SCROFF_DB_PASS=强密码 sudo bash deploy-ubuntu.sh
 # =============================================================
 
 set -euo pipefail
@@ -26,11 +32,8 @@ set -euo pipefail
 SCROFF_HOME="${SCROFF_HOME:-/opt/scroff-server}"
 SCROFF_USER="${SCROFF_USER:-scroff}"
 SCROFF_PORT="${SCROFF_PORT:-8080}"
-DB_NAME="${DB_NAME:-scroff}"
-DB_USER="${DB_USER:-scroff}"
-DB_PASS="${SCROFF_DB_PASS:-scroff_pwd}"   # 首次建库用，部署后可改 application-local.yml
-GIT_REPO="${SCROFF_GIT_REPO:-https://github.com/YOURNAME/scroff.git}"   # ← 改成你的仓库
-GIT_BRANCH="${SCROFF_GIT_BRANCH:-main}"
+GIT_REPO="${SCROFF_GIT_REPO:-https://github.com/guwan/scroff.git}"   # ← 改成你的仓库
+GIT_BRANCH="${SCROFF_GIT_BRANCH:-master}"
 BUILD_DIR="${BUILD_DIR:-/opt/scroff-build}"                              # git 克隆 + gradle 构建的目录
 SERVICE_NAME="${SERVICE_NAME:-scroff-server}"
 IS_FRESH_INSTALL=false
@@ -47,48 +50,30 @@ die()  { echo -e "${RED}ERROR${NC} $*"; exit 1; }
 # ---------- 0. 首次安装检测 ----------
 if [ ! -d "$SCROFF_HOME" ] || [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
     IS_FRESH_INSTALL=true
-    say "[0/9] 首次安装检测：$SCROFF_HOME 不存在或服务未注册"
+    say "[0/8] 首次安装检测：$SCROFF_HOME 不存在或服务未注册"
 fi
 if [ "$(id -u)" -ne 0 ]; then
     die "请用 sudo 运行：sudo bash $0"
 fi
 
 # ---------- 1. 装系统包（仅首次） ----------
+#   JDK 21 (Spring Boot 3.x 要求)
+#   mariadb-server、git 视为已存在（远程 mariadb + 宿主自带 git），不重复装
 if [ "$IS_FRESH_INSTALL" = true ]; then
-    say "[1/9] 装系统包：openjdk-17 + mariadb-server + adb + git"
+    say "[1/8] 装系统包：openjdk-21 + adb + curl + ca-certificates"
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        openjdk-17-jdk-headless mariadb-server adb curl git ca-certificates
+        openjdk-21-jdk-headless adb curl ca-certificates
 fi
 
 # ---------- 2. 建用户（仅首次） ----------
 if [ "$IS_FRESH_INSTALL" = true ]; then
-    say "[2/9] 建服务用户 $SCROFF_USER"
+    say "[2/8] 建服务用户 $SCROFF_USER"
     id -u "$SCROFF_USER" >/dev/null 2>&1 || useradd -r -s /bin/false "$SCROFF_USER"
 fi
 
-# ---------- 3. 建库（仅首次） ----------
-if [ "$IS_FRESH_INSTALL" = true ]; then
-    say "[3/9] 建数据库 $DB_NAME / 用户 $DB_USER"
-    systemctl enable --now mariadb
-    # 等 mariadb 完全启动
-    for i in 1 2 3 4 5; do
-        if mysql -uroot -e "SELECT 1" >/dev/null 2>&1; then break; fi
-        sleep 1
-    done
-    mysql -uroot <<EOF
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
-    DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
-FLUSH PRIVILEGES;
-EOF
-    warn "数据库初始密码: $DB_PASS （请到 $SCROFF_HOME/application-local.yml 同步改）"
-fi
-
-# ---------- 4. 拉代码 ----------
-say "[4/9] 拉取代码到 $BUILD_DIR (branch: $GIT_BRANCH)"
+# ---------- 3. 拉代码 ----------
+say "[3/8] 拉取代码到 $BUILD_DIR (branch: $GIT_BRANCH)"
 mkdir -p "$BUILD_DIR"
 if [ ! -d "$BUILD_DIR/.git" ]; then
     git clone -b "$GIT_BRANCH" "$GIT_REPO" "$BUILD_DIR"
@@ -102,8 +87,8 @@ else
 fi
 cd "$BUILD_DIR/scroff-server"
 
-# ---------- 5. 构建 ----------
-say "[5/9] 构建 jar（gradle clean bootJar，可能需要几分钟首次会下依赖）"
+# ---------- 4. 构建 ----------
+say "[4/8] 构建 jar（gradle clean bootJar，可能需要几分钟首次会下依赖）"
 chmod +x gradlew 2>/dev/null || true
 ./gradlew clean bootJar -x test --no-daemon
 
@@ -112,16 +97,16 @@ JAR_PATH="$BUILD_DIR/scroff-server/build/libs/scroff-server.jar"
 JAR_SIZE=$(du -h "$JAR_PATH" | cut -f1)
 say "    构建完成: $JAR_PATH ($JAR_SIZE)"
 
-# ---------- 6. 停旧服务 ----------
+# ---------- 5. 停旧服务 ----------
 if systemctl is-active --quiet "$SERVICE_NAME"; then
-    say "[6/9] 停旧服务 $SERVICE_NAME"
+    say "[5/8] 停旧服务 $SERVICE_NAME"
     systemctl stop "$SERVICE_NAME"
 else
-    say "[6/9] 旧服务未运行，跳过 stop"
+    say "[5/8] 旧服务未运行，跳过 stop"
 fi
 
-# ---------- 7. 部署 ----------
-say "[7/9] 部署到 $SCROFF_HOME"
+# ---------- 6. 部署 ----------
+say "[6/8] 部署到 $SCROFF_HOME"
 mkdir -p "$SCROFF_HOME"
 
 # 备份上一版本 jar
@@ -143,7 +128,7 @@ if [ ! -f "$SCROFF_HOME/application-local.yml" ]; then
        "$SCROFF_HOME/application-local.yml"
     warn "首次部署：已复制 application-local.yml.example → application-local.yml"
     warn "请编辑: sudo nano $SCROFF_HOME/application-local.yml"
-    warn "      填入数据库密码（默认 $DB_PASS）和 ADB 路径"
+    warn "      填入远程 mariadb 的地址、账号、密码和 ADB 路径"
     warn "      然后再 sudo systemctl restart $SERVICE_NAME"
 fi
 
@@ -151,21 +136,33 @@ fi
 chown -R "$SCROFF_USER:$SCROFF_USER" "$SCROFF_HOME"
 chmod 600 "$SCROFF_HOME/application-local.yml" 2>/dev/null || true
 
-# ---------- 8. 注册 systemd（仅首次） ----------
+# ---------- 7. 注册 systemd（仅首次） ----------
 if [ "$IS_FRESH_INSTALL" = true ]; then
-    say "[8/9] 注册 systemd 服务 $SERVICE_NAME"
+    say "[7/8] 注册 systemd 服务 $SERVICE_NAME"
+    # 显式指向 JDK 21 的 java，避免系统装了多个 JDK 时跑错版本
+    JAVA_BIN="$(update-alternatives --query java 2>/dev/null | awk -F': ' '/^Value:/ {print $2; exit}')"
+    if [ -z "$JAVA_BIN" ] || [ ! -x "$JAVA_BIN" ]; then
+        # 兜底：常见路径直接找
+        for j in /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
+                 /usr/lib/jvm/java-21-openjdk/bin/java; do
+            [ -x "$j" ] && JAVA_BIN="$j" && break
+        done
+    fi
+    [ -x "$JAVA_BIN" ] || die "找不到 JDK 21 的 java 可执行文件"
+    say "    使用 JDK: $JAVA_BIN"
+
     cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
 [Unit]
 Description=Scroff Server - ADB-based screen controller
-After=network.target mariadb.service
-Wants=mariadb.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=${SCROFF_USER}
 WorkingDirectory=${SCROFF_HOME}
 # 使用 local profile，自动加载同目录的 application-local.yml
-ExecStart=/usr/bin/java -jar ${SCROFF_HOME}/scroff-server.jar --spring.profiles.active=local
+ExecStart=${JAVA_BIN} -jar ${SCROFF_HOME}/scroff-server.jar --spring.profiles.active=local
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/${SERVICE_NAME}.log
@@ -181,11 +178,11 @@ Environment=JAVA_OPTS=-Xms256m -Xmx512m
 WantedBy=multi-user.target
 UNIT
 else
-    say "[8/9] systemd 服务已注册，跳过"
+    say "[7/8] systemd 服务已注册，跳过"
 fi
 
-# ---------- 9. 启动 ----------
-say "[9/9] 启动服务"
+# ---------- 8. 启动 ----------
+say "[8/8] 启动服务"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"
@@ -216,10 +213,10 @@ cat <<EOF
  历史 jar:    $SCROFF_HOME/scroff-server.jar.prev  (回滚: mv .prev scroff-server.jar)
 
  敏感配置:    $SCROFF_HOME/application-local.yml  (chmod 600)
-              改完密码后: sudo systemctl restart ${SERVICE_NAME}
+              改完密码/地址后: sudo systemctl restart ${SERVICE_NAME}
 
  重新部署:    sudo bash $0
               （自动检测为更新模式，只拉新代码 + 构建 + 重启，
-                不会重建库、不会重装包、不会覆盖 application-local.yml）
+                不会重装包、不会覆盖 application-local.yml）
 ============================================================
 EOF
