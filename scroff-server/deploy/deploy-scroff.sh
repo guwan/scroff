@@ -20,10 +20,10 @@
 #   - systemd 用 --spring.profiles.active=local 加载 application-local.yml
 #
 # 用法：
-#   sudo bash deploy-ubuntu.sh
+#   sudo bash deploy-scroff.sh
 # 自定义参数（可选）：
-#   SCROFF_GIT_REPO=https://github.com/yourname/scroff.git sudo bash deploy-ubuntu.sh
-#   SCROFF_GIT_BRANCH=develop sudo bash deploy-ubuntu.sh
+#   SCROFF_GIT_REPO=https://github.com/yourname/scroff.git sudo bash deploy-scroff.sh
+#   SCROFF_GIT_BRANCH=develop sudo bash deploy-scroff.sh
 # =============================================================
 
 set -euo pipefail
@@ -31,7 +31,7 @@ set -euo pipefail
 # ---------- 可通过环境变量覆盖 ----------
 SCROFF_HOME="${SCROFF_HOME:-/opt/scroff-server}"
 SCROFF_USER="${SCROFF_USER:-scroff}"
-SCROFF_PORT="${SCROFF_PORT:-8080}"
+SCROFF_PORT="${SCROFF_PORT:-8880}"
 GIT_REPO="${SCROFF_GIT_REPO:-https://github.com/guwan/scroff.git}"   # ← 改成你的仓库
 GIT_BRANCH="${SCROFF_GIT_BRANCH:-master}"
 BUILD_DIR="${BUILD_DIR:-/opt/scroff-build}"                              # git 克隆 + gradle 构建的目录
@@ -58,12 +58,19 @@ fi
 
 # ---------- 1. 装系统包（仅首次） ----------
 #   JDK 21 (Spring Boot 3.x 要求)
+#   adb 由 android-tools-adb 包提供（apt 仓库里 `adb` 是个虚拟包指向它）
 #   mariadb-server、git 视为已存在（远程 mariadb + 宿主自带 git），不重复装
 if [ "$IS_FRESH_INSTALL" = true ]; then
-    say "[1/8] 装系统包：openjdk-21 + adb + curl + ca-certificates"
+    say "[1/8] 装系统包：openjdk-21 + android-tools-adb + curl + ca-certificates"
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        openjdk-21-jdk-headless adb curl ca-certificates
+        openjdk-21-jdk-headless android-tools-adb curl ca-certificates
+
+    # 验证 adb 真的装上了（装失败就立刻报错，别等服务跑起来才发现 adb 缺）
+    if ! command -v adb >/dev/null 2>&1 || [ ! -x /usr/bin/adb ]; then
+        die "adb 装失败，请手动检查 apt 源：apt-cache search android-tools-adb"
+    fi
+    say "    adb 已就绪: $(/usr/bin/adb version | head -1)"
 fi
 
 # ---------- 2. 建用户（仅首次） ----------

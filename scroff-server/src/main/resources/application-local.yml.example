@@ -31,6 +31,8 @@ scroff:
   adb:
     # ===== ADB profiles（多配置 + 运行时切换）=====
     # 在 /settings 页面可以即时切换激活的 profile
+    # 部署到 Linux/Ubuntu：把 linux-default 设为 enabled=true，并把 active-profile-id 改成 linux-default
+    # 本地 Windows 开发：保持 android-sdk enabled，把 active-profile-id 留为 android-sdk
     profiles:
       # Windows 上最常用：Android SDK 自带的 adb.exe
       - id: android-sdk
@@ -44,11 +46,13 @@ scroff:
         executable: C:/Windows/System32/wsl.exe
         args: ["adb"]   # 包装器场景需要：wsl.exe adb ...
         enabled: false
-      # Linux 部署
+      # Linux/Ubuntu 部署：apt install android-tools-adb 后就是 /usr/bin/adb
       - id: linux-default
-        name: "Linux 默认"
+        name: "Linux 默认 (/usr/bin/adb)"
         executable: /usr/bin/adb
-        enabled: false
+        enabled: true
     # 可选：默认激活哪个（也可用 /settings 页面切换，覆盖此项）
-    active-profile-id: android-sdk
+    # Windows 本地开发 → android-sdk
+    # Linux 部署       → linux-default
+    active-profile-id: linux-default
     auto-connect-on-startup: true
