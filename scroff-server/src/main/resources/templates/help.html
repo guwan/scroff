@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html xmlns:th="http://thymeleaf.org">
+<head th:replace="~{_layout :: head('使用教程')}"></head>
+<body>
+
+<nav th:replace="~{_layout :: navbar('help')}"></nav>
+
+<main class="container">
+
+    <h1>📖 Scroff 使用教程</h1>
+    <p class="muted">5 分钟上手集中控屏系统</p>
+
+    <!-- ============ 1. 它是什么 ============ -->
+    <section class="help-section">
+        <h2>1. Scroff 是什么？</h2>
+        <p>
+            Scroff（Screen On/Off）是一个<strong>通过 ADB over TCP/IP</strong> 远程管理安卓叫号机屏幕开关的服务。
+            你只需要把叫号机的 IP 配进来，就能在 Web 后台一键开关、定时开关，不用再跑到现场。
+        </p>
+        <div class="callout">
+            <strong>📺 适用场景</strong>：医院、银行、政府大厅等场所的多台安卓叫号机/信息屏，
+            需要统一开关、定时开关。
+        </div>
+    </section>
+
+    <!-- ============ 2. 快速开始 ============ -->
+    <section class="help-section">
+        <h2>2. 快速开始（5 分钟）</h2>
+
+        <h3>第 1 步：把叫号机切到 TCP/IP 模式</h3>
+        <p>每台叫号机只需做<strong>一次</strong>（之后再也不需要 USB）：</p>
+        <ol>
+            <li>用 USB 把叫号机连到一台电脑（Mac/Win/Linux 都行）</li>
+            <li>执行：<code>adb tcpip 5555</code> （设备重启后会保持 TCP 模式）</li>
+            <li>拔掉 USB</li>
+            <li>在同网段任何机器执行：<code>adb connect 192.168.1.50:5555</code></li>
+        </ol>
+        <div class="callout">
+            <strong>💡 提示</strong>：叫号机只要和 Scroff Server 在同一子网就行。
+            如果叫号机是 Android 11+，无需 USB 也能开启 ADB 调试（开发者选项 → 无线调试）。
+        </div>
+
+        <h3>第 2 步：在 Scroff 添加设备</h3>
+        <ol>
+            <li>登录 Scroff 后台 → <a href="/devices">设备</a> → <strong>+ 新建设备</strong></li>
+            <li>填写：
+                <ul>
+                    <li><strong>名称</strong>：方便识别的名字（如"前台叫号机 1"）</li>
+                    <li><strong>分类</strong>：分组管理（如"前台"/"取药"/"检验"）</li>
+                    <li><strong>IP</strong>：叫号机的局域网 IP（如 <code>192.168.1.50</code>）</li>
+                    <li><strong>端口</strong>：默认 <code>5555</code></li>
+                    <li><strong>排序</strong>：列表里显示的顺序，数字小的在前</li>
+                </ul>
+            </li>
+            <li>点 <strong>保存</strong></li>
+        </ol>
+
+        <h3>第 3 步：测试连接</h3>
+        <p>回到设备列表，点 <strong>测连</strong> 按钮：</p>
+        <ul>
+            <li>🟢 绿色 <code>ONLINE</code>：连接成功，可以控制</li>
+            <li>🔴 红色 <code>OFFLINE</code>：连不上，鼠标悬停看错误详情</li>
+        </ul>
+        <div class="callout">
+            <strong>⚠️ 常见连接失败</strong>：
+            <ul>
+                <li>叫号机没在同一子网（路由隔离）</li>
+                <li>叫号机防火墙阻断了 5555 端口</li>
+                <li>叫号机重启后没保留 TCP 模式（部分定制 ROM 会重置）</li>
+            </ul>
+        </div>
+
+        <h3>第 4 步：立即控制</h3>
+        <p>在设备列表点 <strong>操作 ▼</strong> 下拉菜单：</p>
+        <ul>
+            <li><strong>开屏 / 关屏</strong>：立即发送 ADB 命令</li>
+            <li><strong>查屏状态</strong>：弹出 modal，显示当前屏幕实际开关状态</li>
+            <li><strong>测试所有连接</strong> / <strong>查所有屏状态</strong>：批量操作（顶部按钮）</li>
+        </ul>
+    </section>
+
+    <!-- ============ 3. 定时任务 ============ -->
+    <section class="help-section">
+        <h2>3. 定时任务（自动化）</h2>
+
+        <h3>两种模式</h3>
+        <table class="help-table">
+            <thead>
+                <tr>
+                    <th>模式</th>
+                    <th>说明</th>
+                    <th>典型场景</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>单台设备</strong></td>
+                    <td>只对一台叫号机生效</td>
+                    <td>某台机需要特殊作息（如自助机 24h 不关）</td>
+                </tr>
+                <tr>
+                    <td><strong>所有设备</strong></td>
+                    <td>对所有<em>启用</em>的设备生效</td>
+                    <td>每天统一 7:50 开屏、17:50 关屏</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>⏰ 优先级规则：<span class="tag tag-info">单台 &gt; 所有</span></h3>
+        <p>
+            当一台叫号机<strong>同时</strong>被两个 schedule "管到"时：
+        </p>
+        <ul>
+            <li>所有设备 schedule：<code>0 50 17 * * *</code>（每天 17:50 关屏）</li>
+            <li>叫号机 1 的单台 schedule：<code>0 50 17 * * *</code>（每天 17:50 关屏）</li>
+        </ul>
+        <p>
+            17:50 这一刻，叫号机 1 <strong>只</strong>由单台 schedule 控制（不走所有设备那条），其他设备走所有设备那条。
+        </p>
+        <div class="callout">
+            <strong>匹配条件</strong>：必须 <em>cron 字符串完全相同</em>（同秒同分同时刻）才视为"冲突"。
+            如果单台是 17:55、所有是 17:50，两者不冲突，叫号机 1 会被所有 schedule 关一次，再被单台 schedule 单独关一次。
+        </div>
+
+        <h3>Cron 表达式（6 段）</h3>
+        <p>格式：<code>秒 分 时 日 月 周</code></p>
+        <table class="help-table">
+            <thead>
+                <tr>
+                    <th>表达式</th>
+                    <th>含义</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td><code>0 50 7 * * *</code></td><td>每天 07:50</td></tr>
+                <tr><td><code>0 50 17 * * *</code></td><td>每天 17:50</td></tr>
+                <tr><td><code>0 0 8 * * 1-5</code></td><td>工作日（周一到周五）08:00</td></tr>
+                <tr><td><code>0 0 22 * * *</code></td><td>每天 22:00</td></tr>
+                <tr><td><code>0 0 0 1 * *</code></td><td>每月 1 号 00:00</td></tr>
+            </tbody>
+        </table>
+        <p class="muted">表单里有"常用预设"按钮，点一下自动填入，不用手写。</p>
+    </section>
+
+    <!-- ============ 4. 高级功能 ============ -->
+    <section class="help-section">
+        <h2>4. 高级功能</h2>
+
+        <h3>多 ADB 路径（按环境切换）</h3>
+        <p>
+            Scroff 支持配置多个 ADB profile（如 Windows 上的 <code>adb.exe</code> 和
+            Linux 上的 <code>/usr/bin/adb</code>，或通过 WSL 调用）。
+            在 <a href="/settings">设置</a> 页面可一键切换，立即生效，无需重启。
+        </p>
+
+        <h3>分类与排序</h3>
+        <ul>
+            <li>每个设备有"分类"字段（自由文本，如"前台"/"取药"）</li>
+            <li>"排序"字段数字小的在前，方便按业务顺序展示</li>
+            <li>复制设备时 sortOrder 自动 +1，新设备排在源设备后面</li>
+        </ul>
+
+        <h3>页面大小</h3>
+        <p>
+            设备列表右上角有"每页 N 条"下拉，10/20/50/100/200 可选。
+            选择会写入浏览器 localStorage，刷新页面保留。
+        </p>
+    </section>
+
+    <!-- ============ 5. 故障排查 ============ -->
+    <section class="help-section">
+        <h2>5. 故障排查</h2>
+
+        <h3>"OFFLINE" / 测连失败</h3>
+        <ol>
+            <li>叫号机和 Server 在同一子网？<code>ping 192.168.1.50</code></li>
+            <li>叫号机 5555 端口可达？<code>telnet 192.168.1.50 5555</code></li>
+            <li>叫号机的 ADB 调试开着？开发者选项 → USB 调试</li>
+            <li>Server 端 adb 路径正确？<a href="/settings">设置</a> 页面检查</li>
+        </ol>
+
+        <h3>定时任务不触发</h3>
+        <ol>
+            <li>看 <a href="/logs">日志</a>：有没有 <code>schedule 触发: id=X</code> 的记录？</li>
+            <li>Server 进程是否在跑？容器/CI 环境可能不持久</li>
+            <li>Server 时区对吗？<code>date</code> 看服务器时间</li>
+        </ol>
+
+        <h3>关屏命令不生效</h3>
+        <p>
+            Scroff 默认用 <code>dumpsys power</code> 控屏，部分定制 ROM（如某些医疗设备）
+            可能屏蔽了此命令。在 <code>application.yml</code> 里改 <code>scroff.adb.screen-off-command</code>
+            即可适配。
+        </p>
+    </section>
+
+    <!-- ============ 6. 安全注意 ============ -->
+    <section class="help-section">
+        <h2>6. 安全注意</h2>
+        <ul>
+            <li>⚠️ Scroff 后台<strong>无内置登录</strong>，生产环境<strong>必须</strong>放在内网，或加 Nginx 反向代理 + Basic Auth</li>
+            <li>数据库密码、ADB 路径等敏感配置写在 <code>application-local.yml</code>，不会提交到 Git</li>
+            <li>删除设备前，先到 <a href="/schedules">定时</a> 页面删掉引用该设备的任务</li>
+        </ul>
+    </section>
+
+    <p class="footer-note muted">
+        还有问题？联系运维或参考源码 README。
+    </p>
+</main>
+
+<footer th:replace="~{_layout :: footer}"></footer>
+</body>
+</html>

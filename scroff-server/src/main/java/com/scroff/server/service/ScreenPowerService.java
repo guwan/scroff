@@ -16,8 +16,10 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -167,8 +169,15 @@ public class ScreenPowerService {
         boolean powerOn = (s.getAction() == Schedule.Action.ON);
         String msg;
         if (s.isForAllDevices()) {
-            // 对所有启用设备生效：复用 /devices/all/on|/off 同样的并发批量逻辑
-            BatchControlResult r = controlAll(powerOn, ScreenLog.TriggerType.SCHEDULE);
+            // 优先级：单台 > 所有。
+            // 所有设备 mode 触发时，查"同 cron 的单台 schedule 对应的 device id"列表，
+            // 这些设备由单台 schedule "接管"，从本批次里排除，避免重复/冲突控制。
+            List<Long> overriddenIds = scheduleRepo.findOverridingDeviceIds(s.getCron());
+            if (!overriddenIds.isEmpty()) {
+                log.info("schedule {}（所有设备）检测到 {} 台设备被单台定时器覆盖，跳过本批次: {}",
+                        s.getId(), overriddenIds.size(), overriddenIds);
+            }
+            BatchControlResult r = controlAllExcept(powerOn, overriddenIds, ScreenLog.TriggerType.SCHEDULE);
             msg = r.summary();
         } else {
             // 对单台设备生效（原行为）
@@ -211,13 +220,46 @@ public class ScreenPowerService {
      * @return 给用户看的汇总消息
      */
     public BatchControlResult controlAll(boolean powerOn, ScreenLog.TriggerType trigger) {
-        List<Device> devices = deviceRepo.findAllByEnabledTrue();
+        return controlAllExcept(powerOn, List.of(), trigger);
+    }
+
+    /**
+     * 批量控制所有启用设备，但**排除**指定 device id 列表。
+     * 用于实现 schedule 优先级：所有设备 mode 触发时，把"被单台 schedule 同 cron 接管"的设备排除掉。
+     *
+     * <p>例：所有设备 schedule "0 50 17 * * *" 触发时：
+     * <ol>
+     *   <li>查 {@code scheduleRepo.findOverridingDeviceIds("0 50 17 * * *")} 拿到被接管的设备 ID 列表</li>
+     *   <li>这些设备由各自的单台 schedule 控制，不在本批次里</li>
+     *   <li>其他设备走本方法批量控制</li>
+     * </ol>
+     *
+     * @param powerOn    true=开屏, false=关屏
+     * @param excludeIds 排除的 device id 列表（不修改原集合）
+     * @param trigger    触发类型，写到 screen_log.trigger 字段
+     */
+    public BatchControlResult controlAllExcept(boolean powerOn, List<Long> excludeIds, ScreenLog.TriggerType trigger) {
+        // 转 Set 让 contains 是 O(1)
+        Set<Long> excludeSet = excludeIds == null ? Set.of() : new HashSet<>(excludeIds);
+
+        // 过滤掉禁用的和被排除的
+        List<Device> devices = deviceRepo.findAllByEnabledTrue().stream()
+                .filter(d -> !excludeSet.contains(d.getId()))
+                .toList();
+
         if (devices.isEmpty()) {
-            return new BatchControlResult(0, 0, List.of(), "没有启用的设备");
+            if (excludeSet.isEmpty()) {
+                return new BatchControlResult(0, 0, List.of(), "没有启用的设备");
+            } else {
+                return new BatchControlResult(0, 0, List.of(),
+                        "所有启用的设备都被单台定时器覆盖（" + excludeSet.size() + " 台），本批次无设备可执行");
+            }
         }
 
         String action = powerOn ? "开屏" : "关屏";
-        log.info("批量{}开始，设备数={}", action, devices.size());
+        String skipNote = excludeSet.isEmpty() ? "" :
+                "（已跳过 " + excludeSet.size() + " 台被单台定时器覆盖的设备）";
+        log.info("批量{}开始，设备数={} {}", action, devices.size(), skipNote);
 
         // 并发提交到 batchPool。lambda 里调 self.control()，必须走代理才能触发 @Transactional
         List<CompletableFuture<DeviceResult>> futures = new ArrayList<>(devices.size());
@@ -260,7 +302,7 @@ public class ScreenPowerService {
             }
         }
 
-        String summary = String.format("批量%s: %d/%d 成功", action, success, devices.size());
+        String summary = String.format("批量%s: %d/%d 成功%s", action, success, devices.size(), skipNote);
         if (failed > 0) {
             // 截断到 5 条，避免 flash 消息过长
             List<String> shown = failureMsgs.size() > 5

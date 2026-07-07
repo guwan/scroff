@@ -143,4 +143,20 @@ class ScheduleControllerTest {
         assertFalse(s.isForAllDevices(), "targetAll=null 应兜底为 false（单台模式）");
         assertEquals(2L, s.getDeviceId(), "targetAll=null 时走单台分支，deviceId 取 form 值");
     }
+
+    /**
+     * 防回归：再增加新字段时也要走 applyForm，不能漏。
+     * <p>这个测试不强求通过（ScheduleForm 可能后续加字段），但**报告里能看到 reminder**。
+     */
+    @Test
+    @DisplayName("⚠️ REMINDER：给 ScheduleForm 加字段时务必更新 applyForm")
+    void reminder_addNewFieldMustUpdateApplyForm() {
+        // 没有断言，只是提醒开发者：
+        // - 改了 ScheduleForm
+        // - 改了 schedule-form.html
+        // - 别忘了改 ScheduleController.applyForm
+        // - 别忘了改 SchemaConstants（如有）
+        // 详见 ScheduleControllerTest 类注释的检查清单
+        assertTrue(true);
+    }
 }

@@ -30,4 +30,22 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
                       @Param("now") LocalDateTime now,
                       @Param("status") Schedule.LastRunStatus status,
                       @Param("msg") String msg);
+
+    /**
+     * 查询同 cron 的"单台 mode"schedule 对应的 device_id 列表。
+     * 用于"所有设备 mode"触发时排除被单台 schedule 接管的设备，实现"单台 > 所有"优先级。
+     *
+     * <p>例：所有设备 schedule cron = "0 50 17 * * *"
+     *     设备 5 有单台 schedule cron = "0 50 17 * * *" （同 cron）→ 设备 5 被"接管"
+     *     设备 6 有单台 schedule cron = "0 55 17 * * *" （不同 cron）→ 设备 6 不被接管
+     *
+     * <p>只匹配 enabled=true + target_all=false + cron 相等的活跃 schedule。
+     * DISTINCT 处理"同一设备多个同 cron 单台 schedule"的去重。
+     */
+    @Query("SELECT DISTINCT s.deviceId FROM Schedule s " +
+           "WHERE s.enabled = true " +
+           "AND s.targetAll = false " +
+           "AND s.cron = :cron " +
+           "AND s.deviceId IS NOT NULL")
+    List<Long> findOverridingDeviceIds(@Param("cron") String cron);
 }
