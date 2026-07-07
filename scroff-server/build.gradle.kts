@@ -45,6 +45,11 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // 显示每个用例结果（默认只汇总）
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = false
+    }
 }
 
 // Spring Boot fat jar
@@ -52,9 +57,4 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveBaseName.set("scroff-server")
     archiveVersion.set("")
     archiveClassifier.set("")
-}
-
-// 禁用自带 test 任务跑空用例报错
-tasks.named<Test>("test") {
-    enabled = false
 }

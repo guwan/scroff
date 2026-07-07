@@ -32,8 +32,18 @@
             <td th:text="${s.id}">1</td>
             <td th:text="${s.name}">--</td>
             <td>
-                <span th:if="${deviceMap != null and deviceMap.containsKey(s.deviceId)}"
-                      th:text="${deviceMap[s.deviceId]}">--</span>
+                <!--
+                    必须用 isForAllDevices()，不能直接 s.targetAll：
+                    1. 兼容 DB 老数据 target_all=NULL 场景（@PostLoad 会归一为 false）
+                    2. entity method 比直接属性判断更安全
+                -->
+                <span th:if="${s.isForAllDevices()}" class="tag tag-info">📺 所有设备</span>
+                <span th:unless="${s.isForAllDevices()}">
+                    <span th:if="${deviceMap != null and deviceMap.containsKey(s.deviceId)}"
+                          th:text="${deviceMap[s.deviceId]}">--</span>
+                    <span th:unless="${deviceMap != null and deviceMap.containsKey(s.deviceId)}"
+                          class="tag tag-warn">(已删除)</span>
+                </span>
             </td>
             <td>
                 <span th:classappend="${s.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"

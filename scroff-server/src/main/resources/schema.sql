@@ -38,12 +38,13 @@ CREATE TABLE `device` (
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS `schedule`;
 CREATE TABLE `schedule` (
-    `id`               BIGINT      NOT NULL AUTO_INCREMENT,
-    `device_id`        BIGINT      NOT NULL,
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+    `device_id`        BIGINT       NOT NULL DEFAULT 0 COMMENT '单台模式=实际设备ID；所有设备模式=0（哨兵）',
     `name`             VARCHAR(100) NOT NULL COMMENT '业务名（"晚间关屏"）',
     `action`           VARCHAR(10)  NOT NULL COMMENT 'OFF / ON',
     `cron`             VARCHAR(50)  NOT NULL COMMENT 'Spring 6 字段 cron：秒 分 时 日 月 周',
     `enabled`          TINYINT(1)   NOT NULL DEFAULT 1,
+    `target_all`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '0=单台（按 device_id）；1=所有设备（device_id 忽略）',
     `last_run_at`      TIMESTAMP    NULL DEFAULT NULL,
     `last_run_status`  VARCHAR(20)           DEFAULT NULL COMMENT 'SUCCESS / FAILED',
     `last_run_message` VARCHAR(500)          DEFAULT NULL,
@@ -52,8 +53,10 @@ CREATE TABLE `schedule` (
     PRIMARY KEY (`id`),
     KEY `idx_schedule_device` (`device_id`),
     KEY `idx_schedule_enabled` (`enabled`),
-    CONSTRAINT `fk_schedule_device` FOREIGN KEY (`device_id`)
-        REFERENCES `device` (`id`) ON DELETE CASCADE
+    KEY `idx_schedule_target_all` (`target_all`)
+    -- 注意：故意不加 FK 到 device(id)：
+    --   1. target_all=1 时 device_id=0，device 表无 id=0 记录，FK 会让所有设备模式 schedule 保存失败
+    --   2. 删除设备时由应用层显式级联删 schedule（DeviceController.delete）
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时开关屏任务';
 
 -- ------------------------------------------------------------

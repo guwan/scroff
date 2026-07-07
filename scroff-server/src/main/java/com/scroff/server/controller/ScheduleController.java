@@ -5,6 +5,7 @@ import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.repository.ScheduleRepository;
 import com.scroff.server.scheduler.ScheduleExecutor;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -80,7 +81,9 @@ public class ScheduleController {
         }
         Schedule s = opt.get();
         ScheduleForm f = new ScheduleForm();
-        f.setDeviceId(s.getDeviceId());
+        // 全部模式下 deviceId 填 0 占位，这里还原成 null 避免误导用户
+        f.setDeviceId(s.isForAllDevices() ? null : s.getDeviceId());
+        f.setTargetAll(s.getTargetAll());
         f.setName(s.getName());
         f.setAction(s.getAction());
         f.setCron(s.getCron());
@@ -138,11 +141,21 @@ public class ScheduleController {
     }
 
     private void applyForm(Schedule s, ScheduleForm f) {
-        s.setDeviceId(f.getDeviceId());
+        // ⚠ 关键：之前漏了 setTargetAll，导致 form 提交什么值都不会生效
+        // 表现：用户选"所有设备"保存后，列表仍显示"单台"+(已删除)；
+        //       编辑后再点编辑，targetAll 永远不保留。
+        boolean all = Boolean.TRUE.equals(f.getTargetAll());
+        s.setTargetAll(all);
+        // 全部模式下 deviceId 存 0（DB NOT NULL 约束兜底），executor 通过 isForAllDevices() 判定
+        // 单台模式下用 form 提交的 deviceId（可能是 null，但 @AssertTrue 会拦截"单台模式忘选设备"）
+        s.setDeviceId(all ? 0L : f.getDeviceId());
         s.setName(f.getName());
         s.setAction(f.getAction());
         s.setCron(f.getCron());
-        s.setEnabled(f.getEnabled() != null ? f.getEnabled() : Boolean.TRUE);
+        // ⚠ 关键：checkbox 不勾选时 form 不提交该字段，Spring 会把 Boolean 字段绑为 null
+        // 之前 `null → TRUE` 的兜底是 bug：用户取消启用也会被强制启用
+        // 正确兜底是 null → FALSE（用户的"不勾选"明确意图 = 禁用）
+        s.setEnabled(f.getEnabled() != null ? f.getEnabled() : Boolean.FALSE);
     }
 
     private Map<Long, String> deviceMap() {
@@ -156,7 +169,7 @@ public class ScheduleController {
      */
     @Data
     public static class ScheduleForm {
-        @NotNull
+        /** 单台模式必填；全部模式忽略（executor 走 controlAll） */
         private Long deviceId;
 
         @NotBlank
@@ -173,5 +186,17 @@ public class ScheduleController {
         private String cron;
 
         private Boolean enabled = Boolean.TRUE;
+
+        /** true=对所有设备生效, false=对单台设备生效（默认 false） */
+        private Boolean targetAll = Boolean.FALSE;
+
+        /**
+         * 跨字段校验：单台模式必须选设备。
+         * 用 @AssertTrue 是 Bean Validation 标准的跨字段写法。
+         */
+        @AssertTrue(message = "单台模式下必须选择设备")
+        public boolean isDeviceIdValidForScope() {
+            return Boolean.TRUE.equals(targetAll) || deviceId != null;
+        }
     }
 }

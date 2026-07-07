@@ -165,7 +165,15 @@ public class ScreenPowerService {
             return;
         }
         boolean powerOn = (s.getAction() == Schedule.Action.ON);
-        String msg = control(s.getDeviceId(), powerOn, ScreenLog.TriggerType.SCHEDULE);
+        String msg;
+        if (s.isForAllDevices()) {
+            // 对所有启用设备生效：复用 /devices/all/on|/off 同样的并发批量逻辑
+            BatchControlResult r = controlAll(powerOn, ScreenLog.TriggerType.SCHEDULE);
+            msg = r.summary();
+        } else {
+            // 对单台设备生效（原行为）
+            msg = control(s.getDeviceId(), powerOn, ScreenLog.TriggerType.SCHEDULE);
+        }
         Schedule.LastRunStatus status = msg.contains("失败")
                 ? Schedule.LastRunStatus.FAILED
                 : Schedule.LastRunStatus.SUCCESS;

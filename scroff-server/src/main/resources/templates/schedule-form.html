@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
+<html xmlns:th="http://thymeleaf.org">
 <head th:replace="~{_layout :: head(${schedule != null} ? '编辑定时' : '新建定时')}"></head>
 <body>
 
@@ -13,19 +13,46 @@
           th:object="${form}" class="form">
         <div class="field">
             <label>名称 *</label>
-            <input type="text" th:field="*{name}" required>
+            <input type="text" th:field="*{name}" required maxlength="100"
+                   placeholder="例：早班开屏 / 晚班关屏">
             <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}"></div>
         </div>
+
         <div class="field">
+            <label>目标 *</label>
+            <div class="radio-group">
+                <!--
+                    不依赖 th:field 的隐式 checked 判断（Boolean + 静态 checked 在某些组合下会冲突），
+                    改用 name + th:checked 显式指定，行为完全可控。
+                -->
+                <label class="radio">
+                    <input type="radio" name="targetAll" value="false"
+                           th:checked="${form.targetAll == null or !form.targetAll}">
+                    <span>单台设备</span>
+                </label>
+                <label class="radio">
+                    <input type="radio" name="targetAll" value="true"
+                           th:checked="${form.targetAll == true}">
+                    <span>所有设备（同时控制多台）</span>
+                </label>
+            </div>
+            <div class="err"
+                 th:if="${#fields.hasErrors('deviceIdValidForScope')}"
+                 th:errors="*{deviceIdValidForScope}"></div>
+        </div>
+
+        <div class="field" id="deviceIdField">
             <label>设备 *</label>
-            <select th:field="*{deviceId}" required>
+            <select th:field="*{deviceId}">
                 <option value="">-- 请选择 --</option>
                 <option th:each="d : ${devices}"
                         th:value="${d.id}"
                         th:text="${d.name + ' (' + d.address + ')'}">--</option>
             </select>
             <div class="err" th:if="${#fields.hasErrors('deviceId')}" th:errors="*{deviceId}"></div>
+            <div class="err" th:if="${#fields.hasErrors('deviceIdValidForScope')}" th:errors="*{deviceIdValidForScope}"></div>
         </div>
+
         <div class="field">
             <label>动作 *</label>
             <select th:field="*{action}">
@@ -33,20 +60,27 @@
                 <option value="ON">开屏</option>
             </select>
         </div>
+
         <div class="field">
             <label>Cron 表达式 *</label>
-            <input type="text" th:field="*{cron}" placeholder="0 0 22 * * *">
+            <input type="text" id="cronInput" th:field="*{cron}" placeholder="0 50 7 * * *">
+            <div class="cron-presets">
+                <span class="hint-label">常用预设：</span>
+                <button type="button" class="btn btn-sm preset-btn" data-cron="0 50 7 * * *">每天 7:50 开</button>
+                <button type="button" class="btn btn-sm preset-btn" data-cron="0 50 17 * * *">每天 17:50 关</button>
+                <button type="button" class="btn btn-sm preset-btn" data-cron="0 0 8 * * 1-5">工作日 8:00 开</button>
+                <button type="button" class="btn btn-sm preset-btn" data-cron="0 0 18 * * 1-5">工作日 18:00 关</button>
+                <button type="button" class="btn btn-sm preset-btn" data-cron="0 0 22 * * *">每天 22:00 关</button>
+            </div>
             <small class="hint">
-                6 段格式：<b>秒 分 时 日 月 周</b>。<br>
-                示例：
-                <code>0 0 22 * * *</code> = 每天 22:00
+                6 段格式：<b>秒 分 时 日 月 周</b>。
+                <code>0 50 7 * * *</code> = 每天 07:50
                 &nbsp;·&nbsp;
-                <code>0 30 8 * * 1-5</code> = 工作日 08:30
-                &nbsp;·&nbsp;
-                <code>0 0 0 1 * *</code> = 每月 1 号 00:00
+                <code>0 50 17 * * *</code> = 每天 17:50
             </small>
             <div class="err" th:if="${#fields.hasErrors('cron')}" th:errors="*{cron}"></div>
         </div>
+
         <div class="field">
             <label class="checkbox">
                 <input type="checkbox" th:field="*{enabled}"> 启用
@@ -60,5 +94,35 @@
 </main>
 
 <footer th:replace="~{_layout :: footer}"></footer>
+
+<script>
+    /* 单台/全部切换：选中"全部"时隐藏设备下拉框 */
+    function updateTargetMode() {
+        var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
+        var deviceField = document.getElementById('deviceIdField');
+        if (allRadio && allRadio.checked) {
+            deviceField.style.display = 'none';
+            // 清空下拉框（避免误提交 deviceId 干扰）
+            var sel = deviceField.querySelector('select');
+            if (sel) sel.value = '';
+        } else {
+            deviceField.style.display = '';
+        }
+    }
+    document.querySelectorAll('input[name="targetAll"]').forEach(function (r) {
+        r.addEventListener('change', updateTargetMode);
+    });
+    updateTargetMode();
+
+    /* 快捷预设按钮：点一下填入 cron 输入框 */
+    document.querySelectorAll('.preset-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var cron = btn.getAttribute('data-cron');
+            var input = document.getElementById('cronInput');
+            input.value = cron;
+            input.focus();
+        });
+    });
+</script>
 </body>
 </html>
