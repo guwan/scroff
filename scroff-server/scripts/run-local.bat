@@ -78,7 +78,7 @@ echo   Stop       : Ctrl+C
 echo.
 echo   Verify: after startup, you should see in the log:
 echo     'The following 1 profile is active: "local"'
-echo     '...Tomcat started on port 8080...'
+echo     '...Tomcat started on port 8880...'
 echo.
 
 call gradlew.bat bootRun -Dspring.profiles.active=local

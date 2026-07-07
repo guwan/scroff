@@ -10,8 +10,43 @@
 
     <div class="page-header">
         <h1>设备</h1>
-        <a class="btn btn-primary" href="/devices/new">+ 新建设备</a>
+        <div class="header-actions">
+            <button class="btn btn-info" type="button"
+                    th:disabled="${page.totalElements == 0}"
+                    onclick="testAllConnect(this)">测试所有连接</button>
+            <button class="btn btn-info" type="button"
+                    th:disabled="${page.totalElements == 0}"
+                    onclick="checkAllScreenStatus(this)">查所有屏状态</button>
+            <form method="post" action="/devices/all/on" style="display:inline"
+                  onsubmit="return confirmBatch('确定要打开所有启用设备的屏幕吗？', this)">
+                <input type="hidden" name="size" th:value="${currentSize}"/>
+                <button class="btn btn-ok" type="submit"
+                        th:disabled="${page.totalElements == 0}">全部开</button>
+            </form>
+            <form method="post" action="/devices/all/off" style="display:inline"
+                  onsubmit="return confirmBatch('确定要关闭所有启用设备的屏幕吗？', this)">
+                <input type="hidden" name="size" th:value="${currentSize}"/>
+                <button class="btn btn-warn" type="submit"
+                        th:disabled="${page.totalElements == 0}">全部关</button>
+            </form>
+            <a class="btn btn-primary" href="/devices/new">+ 新建设备</a>
+        </div>
     </div>
+
+    <!-- 页面大小选择器：GET 表单自动提交到 /devices?size=N&page=0 -->
+    <form method="get" action="/devices" class="size-form" id="sizeForm">
+        <input type="hidden" name="page" value="0"/>
+        <label>
+            每页
+            <select name="size" id="sizeSelect" onchange="onSizeChange(this)">
+                <option th:each="n : ${sizeOptions}"
+                        th:value="${n}"
+                        th:text="${n}"
+                        th:selected="${n == currentSize}">20</option>
+            </select>
+            条
+        </label>
+    </form>
 
     <table class="table">
         <thead>
@@ -52,21 +87,40 @@
                       th:text="${d.enabled} ? '是' : '否'">是</span>
             </td>
             <td class="actions">
-                <form method="post" th:action="@{'/devices/' + ${d.id} + '/test'}" style="display:inline">
-                    <button class="btn btn-sm" type="submit">测连</button>
-                </form>
-                <form method="post" th:action="@{'/devices/' + ${d.id} + '/on'}" style="display:inline">
-                    <button class="btn btn-sm btn-ok" type="submit">开</button>
-                </form>
-                <form method="post" th:action="@{'/devices/' + ${d.id} + '/off'}" style="display:inline">
-                    <button class="btn btn-sm btn-warn" type="submit">关</button>
-                </form>
-                <a class="btn btn-sm" th:href="@{'/devices/' + ${d.id} + '/edit'}">编辑</a>
-                <form method="post" th:action="@{'/devices/' + ${d.id} + '/delete'}"
-                      style="display:inline"
-                      onsubmit="return confirm('确认删除？相关定时任务也会删除')">
-                    <button class="btn btn-sm btn-err" type="submit">删</button>
-                </form>
+                <div class="dropdown" th:attr="data-id=${d.id}, data-name=${d.name}, data-host=${d.host + ':' + d.adbPort}">
+                    <button class="btn btn-sm dropdown-toggle" type="button" onclick="toggleDropdown(this)">操作 ▼</button>
+                    <div class="dropdown-menu">
+                        <!-- 控制类：高频操作放最上面 -->
+                        <form method="post" th:action="@{'/devices/' + ${d.id} + '/on'}" style="margin:0">
+                            <button class="dropdown-item item-ok" type="submit">开屏</button>
+                        </form>
+                        <form method="post" th:action="@{'/devices/' + ${d.id} + '/off'}" style="margin:0">
+                            <button class="dropdown-item item-warn" type="submit">关屏</button>
+                        </form>
+                        <div class="dropdown-sep"></div>
+                        <!-- 检查类：只读 -->
+                        <form method="post" th:action="@{'/devices/' + ${d.id} + '/test'}" style="margin:0">
+                            <button class="dropdown-item" type="submit">测试连接</button>
+                        </form>
+                        <button class="dropdown-item" type="button"
+                                th:attr="data-id=${d.id}, data-name=${d.name}"
+                                onclick="checkScreenStatus(this)">查屏状态</button>
+                        <div class="dropdown-sep"></div>
+                        <!-- 管理类 -->
+                        <a class="dropdown-item" th:href="@{'/devices/' + ${d.id} + '/edit'}">编辑</a>
+                        <form method="post" th:action="@{'/devices/' + ${d.id} + '/duplicate'}" style="margin:0"
+                              onsubmit="return handleDuplicate(this)"
+                              th:attr="data-name=${d.name}">
+                            <button class="dropdown-item" type="submit">复制</button>
+                        </form>
+                        <div class="dropdown-sep"></div>
+                        <!-- 危险操作：放最下面 -->
+                        <form method="post" th:action="@{'/devices/' + ${d.id} + '/delete'}" style="margin:0"
+                              onsubmit="return confirm('确认删除？相关定时任务也会删除')">
+                            <button class="dropdown-item item-danger" type="submit">删除</button>
+                        </form>
+                    </div>
+                </div>
             </td>
         </tr>
         <tr th:if="${page.content.empty}">
@@ -77,12 +131,367 @@
 
     <div class="pager" th:if="${page.totalPages > 1}">
         <span>共 <b th:text="${page.totalElements}">0</b> 台</span>
-        <a th:if="${page.hasPrevious()}" th:href="@{/devices(page=${page.number-1})}">«</a>
+        <a th:if="${page.hasPrevious()}" th:href="@{/devices(page=${page.number-1}, size=${currentSize})}">«</a>
         <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
-        <a th:if="${page.hasNext()}" th:href="@{/devices(page=${page.number+1})}">»</a>
+        <a th:if="${page.hasNext()}" th:href="@{/devices(page=${page.number+1}, size=${currentSize})}">»</a>
     </div>
 </main>
 
 <footer th:replace="~{_layout :: footer}"></footer>
+
+<!-- 通用确认弹窗（仅在调用 showConfirm 时挂到 DOM） -->
+<div id="confirmModal" class="modal-overlay" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmModalMsg">
+        <p class="modal-message" id="confirmModalMsg"></p>
+        <div class="modal-buttons">
+            <button type="button" class="btn-hide" id="confirmModalHide" style="display:none">今天不再提醒</button>
+            <button type="button" class="btn" id="confirmModalCancel">取消</button>
+            <button type="button" class="btn btn-ok" id="confirmModalOk">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- 信息弹窗：用于显示"查屏状态"等只读结果 -->
+<div id="infoModal" class="modal-overlay" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+        <h3 class="modal-title" id="infoModalTitle">查询结果</h3>
+        <div class="modal-message" id="infoModalBody"></div>
+        <div class="modal-buttons">
+            <button type="button" class="btn btn-ok" id="infoModalOk">知道了</button>
+        </div>
+    </div>
+</div>
+
+<script>
+/* 页面大小选择器：onchange 时记到 localStorage，再提交表单 */
+function onSizeChange(sel) {
+    try { localStorage.setItem('scroff.devicesPageSize', sel.value); } catch (e) {}
+    sel.form.submit();
+}
+
+/* 页面加载时：如果 URL 没有 size 参数，但 localStorage 有，记住下拉框的当前值 */
+(function () {
+    try {
+        var saved = localStorage.getItem('scroff.devicesPageSize');
+        var sel = document.getElementById('sizeSelect');
+        if (saved && sel) {
+            // 校验 saved 是当前下拉框里的合法选项
+            for (var i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === saved) {
+                    sel.value = saved;
+                    break;
+                }
+            }
+        }
+    } catch (e) {}
+})();
+
+/**
+ * 通用 confirm 弹窗。
+ * @param {string} message - 弹窗内容（支持 \n 换行）
+ * @param {object} [opts]  - 可选项
+ * @param {string} [opts.hideKey] - 传了就显示"今天不再提醒"按钮；
+ *                                  用 localStorage[hideKey] 存"隐藏到何时"的时间戳（ms）。
+ *                                  下次调用时如果未过期，直接 resolve(true)，不再弹。
+ * @returns {Promise<boolean>} true=确定 / 点"今天不再提醒" / 已隐藏；false=取消 / 点遮罩
+ */
+function showConfirm(message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+        // 1) 检查是否还在"今天不再提醒"窗口内
+        if (opts.hideKey) {
+            var until = parseInt(localStorage.getItem(opts.hideKey) || '0', 10);
+            if (until && until > Date.now()) {
+                resolve(true);
+                return;
+            }
+        }
+
+        var overlay = document.getElementById('confirmModal');
+        var msgEl = document.getElementById('confirmModalMsg');
+        var okBtn = document.getElementById('confirmModalOk');
+        var cancelBtn = document.getElementById('confirmModalCancel');
+        var hideBtn = document.getElementById('confirmModalHide');
+
+        msgEl.textContent = message;
+        hideBtn.style.display = opts.hideKey ? '' : 'none';
+        overlay.hidden = false;
+        // 聚焦到确定按钮，回车直接确认
+        setTimeout(function () { okBtn.focus(); }, 0);
+
+        function close(result) {
+            overlay.hidden = true;
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            hideBtn.removeEventListener('click', onHide);
+            overlay.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve(result);
+        }
+        function onOk() { close(true); }
+        function onCancel() { close(false); }
+        function onHide() {
+            // 24 小时后过期
+            var until = Date.now() + 24 * 60 * 60 * 1000;
+            localStorage.setItem(opts.hideKey, String(until));
+            close(true);
+        }
+        function onBackdrop(e) { if (e.target === overlay) close(false); }
+        function onKey(e) {
+            if (e.key === 'Escape') close(false);
+            else if (e.key === 'Enter') close(true);
+        }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        hideBtn.addEventListener('click', onHide);
+        overlay.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKey);
+    });
+}
+
+/* 复制按钮的二次确认：弹窗带"今天不再提醒" */
+function handleDuplicate(form) {
+    var name = form.dataset.name || '';
+    var msg = '复制设备「' + name + '」？\n'
+            + '新设备会出现在它后面（sortOrder+1）。\n'
+            + '如果 host:port 与源相同，最后一节 IP 会自动递增找空位。';
+    showConfirm(msg, { hideKey: 'scroff.hideDuplicateConfirm' })
+        .then(function (ok) {
+            if (!ok) return;
+            var btn = form.querySelector('button[type="submit"]');
+            if (btn) {
+                btn.disabled = true;
+                btn.dataset.origText = btn.textContent;
+                btn.textContent = '处理中...';
+            }
+            form.submit();
+        });
+    return false;   /* 阻止默认提交，等 showConfirm 走完再手动 submit */
+}
+
+/* 批量开/关按钮的二次确认 + 防双击（普通 confirm，没有"不再提醒"） */
+function confirmBatch(msg, form) {
+    if (!confirm(msg)) return false;
+    var btn = form.querySelector('button[type="submit"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.dataset.origText = btn.textContent;
+        btn.textContent = '处理中...';
+    }
+    return true;
+}
+
+/* 信息弹窗：只显示一个"知道了"按钮 */
+function showInfo(title, html) {
+    return new Promise(function (resolve) {
+        var overlay = document.getElementById('infoModal');
+        var titleEl = document.getElementById('infoModalTitle');
+        var bodyEl = document.getElementById('infoModalBody');
+        var okBtn = document.getElementById('infoModalOk');
+        titleEl.textContent = title || '查询结果';
+        bodyEl.innerHTML = html;
+        overlay.hidden = false;
+        setTimeout(function () { okBtn.focus(); }, 0);
+        function close() {
+            overlay.hidden = true;
+            okBtn.removeEventListener('click', close);
+            overlay.removeEventListener('click', onBackdrop);
+            document.removeEventListener('keydown', onKey);
+            resolve();
+        }
+        function onBackdrop(e) { if (e.target === overlay) close(); }
+        function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter') close(); }
+        okBtn.addEventListener('click', close);
+        overlay.addEventListener('click', onBackdrop);
+        document.addEventListener('keydown', onKey);
+    });
+}
+
+/* "查屏"按钮：AJAX 调后端，弹信息弹窗显示结果 */
+function checkScreenStatus(btn) {
+    var id = btn.dataset.id;
+    var name = btn.dataset.name || ('id=' + id);
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '查询中...';
+
+    fetch('/devices/' + id + '/check-status', { method: 'POST' })
+        .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function (data) {
+            var online = data.online;
+            var screenOn = data.screenOn;   // null | true | false
+            var msg = data.message || '';
+
+            // 大图标 + 状态行
+            var icon = online ? (screenOn === true ? '🟢' : (screenOn === false ? '🔴' : '🟡'))
+                               : '⚫';
+            var stateText;
+            if (!online) {
+                stateText = '<b>不在线</b>';
+            } else if (screenOn === true) {
+                stateText = '<b style="color:#16a34a">屏幕 ON（开）</b>';
+            } else if (screenOn === false) {
+                stateText = '<b style="color:#dc2626">屏幕 OFF（关）</b>';
+            } else {
+                stateText = '<b style="color:#d97706">状态未知</b>';
+            }
+            var html = ''
+                + '<div style="font-size:32px;text-align:center;margin:8px 0">' + icon + '</div>'
+                + '<div style="text-align:center;margin-bottom:8px">' + stateText + '</div>'
+                + '<div style="color:#555;margin-bottom:8px">' + escapeHtml(msg) + '</div>'
+                + (data.rawOutput ? '<details><summary>原始输出</summary><pre style="background:#f5f5f5;padding:8px;border-radius:4px;overflow:auto;max-height:160px">' + escapeHtml(data.rawOutput) + '</pre></details>' : '');
+            return showInfo('屏幕状态：' + name, html);
+        })
+        .catch(function (err) {
+            showInfo('查询失败：' + name,
+                '<div style="color:#dc2626">请求失败：' + escapeHtml(err.message || String(err)) + '</div>');
+        })
+        .then(function () {
+            btn.disabled = false;
+            btn.textContent = orig;
+        });
+}
+
+/* 防 XSS：把任意字符串转成安全的 HTML 文本 */
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/* ---------- 下拉菜单 ---------- */
+function toggleDropdown(btn) {
+    var dd = btn.closest('.dropdown');
+    var wasOpen = dd.classList.contains('open');
+    // 先关掉所有
+    document.querySelectorAll('.dropdown.open').forEach(function (d) {
+        d.classList.remove('open');
+    });
+    // 再开当前（如果之前没开）
+    if (!wasOpen) {
+        dd.classList.add('open');
+        // 焦点放到第一个菜单项，方便键盘操作
+        setTimeout(function () {
+            var first = dd.querySelector('.dropdown-item');
+            if (first) first.focus();
+        }, 0);
+    }
+}
+/* 点击下拉菜单里的某项后，菜单自动关闭（监听 click 事件即可） */
+document.addEventListener('click', function (e) {
+    if (!e.target.closest('.dropdown')) {
+        document.querySelectorAll('.dropdown.open').forEach(function (d) {
+            d.classList.remove('open');
+        });
+    }
+});
+/* Esc 关闭 */
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.dropdown.open').forEach(function (d) {
+            d.classList.remove('open');
+        });
+    }
+});
+
+/* ---------- 页面头部的一键操作（AJAX，弹结果 modal） ---------- */
+
+/* 一键测连所有设备 */
+function testAllConnect(btn) {
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '测试中...';
+    fetch('/devices/all/test', { method: 'POST' })
+        .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function (data) {
+            var rows = (data.results || []).map(function (r) {
+                var icon = r.online ? '🟢' : '🔴';
+                var state = r.online ? '<b style="color:#16a34a">在线</b>'
+                                      : '<b style="color:#dc2626">离线</b>';
+                var err = (r.error && !r.online)
+                    ? '<div style="color:#666;font-size:12px;margin-top:2px">' + escapeHtml(r.error) + '</div>'
+                    : '';
+                return '<tr>'
+                     + '<td style="white-space:nowrap">' + icon + '</td>'
+                     + '<td>' + escapeHtml(r.deviceName) + err + '</td>'
+                     + '<td style="white-space:nowrap">' + state + '</td>'
+                     + '</tr>';
+            }).join('');
+            var html = ''
+                + '<div style="margin-bottom:10px;flex-shrink:0">共 <b>' + data.total + '</b> 台，'
+                + '<span style="color:#16a34a">在线 ' + data.online + '</span> / '
+                + '<span style="color:#dc2626">离线 ' + data.offline + '</span></div>'
+                + '<table>'
+                + '<thead><tr><th></th><th>设备</th><th>状态</th></tr></thead>'
+                + '<tbody>' + (rows || '<tr><td colspan="3" style="padding:8px;color:#888">没有设备</td></tr>') + '</tbody>'
+                + '</table>';
+            return showInfo('测连结果', html);
+        })
+        .catch(function (err) {
+            showInfo('测连失败', '<div style="color:#dc2626">' + escapeHtml(err.message || String(err)) + '</div>');
+        })
+        .then(function () {
+            btn.disabled = false;
+            btn.textContent = orig;
+            // 测完刷新列表（status 列变了）
+            setTimeout(function () { location.reload(); }, 600);
+        });
+}
+
+/* 一键查屏所有设备 */
+function checkAllScreenStatus(btn) {
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '查询中...';
+    fetch('/devices/all/check-status', { method: 'POST' })
+        .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function (data) {
+            var rows = (data.results || []).map(function (r) {
+                var icon, state;
+                if (!r.online) { icon = '⚫'; state = '<b>离线</b>'; }
+                else if (r.screenOn === true) { icon = '🟢'; state = '<b style="color:#16a34a">ON</b>'; }
+                else if (r.screenOn === false) { icon = '🔴'; state = '<b style="color:#dc2626">OFF</b>'; }
+                else { icon = '🟡'; state = '<b style="color:#d97706">未知</b>'; }
+                return '<tr>'
+                     + '<td style="white-space:nowrap">' + icon + '</td>'
+                     + '<td>' + escapeHtml(r.deviceName) + '</td>'
+                     + '<td style="white-space:nowrap">' + state + '</td>'
+                     + '</tr>';
+            }).join('');
+            var html = ''
+                + '<div style="margin-bottom:10px;flex-shrink:0">共 <b>' + data.total + '</b> 台：'
+                + '🟢开 <b>' + data.screenOnCount + '</b>，'
+                + '🔴关 <b>' + data.screenOffCount + '</b>，'
+                + '🟡未知 <b>' + data.unknownCount + '</b>，'
+                + '⚫离线 <b>' + data.offlineCount + '</b></div>'
+                + '<table>'
+                + '<thead><tr><th></th><th>设备</th><th>屏幕</th></tr></thead>'
+                + '<tbody>' + (rows || '<tr><td colspan="3" style="padding:8px;color:#888">没有设备</td></tr>') + '</tbody>'
+                + '</table>';
+            return showInfo('查屏结果', html);
+        })
+        .catch(function (err) {
+            showInfo('查屏失败', '<div style="color:#dc2626">' + escapeHtml(err.message || String(err)) + '</div>');
+        })
+        .then(function () {
+            btn.disabled = false;
+            btn.textContent = orig;
+        });
+}
+</script>
 </body>
 </html>

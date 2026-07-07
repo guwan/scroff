@@ -7,13 +7,23 @@ import com.scroff.server.entity.ScreenLog;
 import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.repository.ScheduleRepository;
 import com.scroff.server.repository.ScreenLogRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 业务层：开屏/关屏。
@@ -26,7 +36,6 @@ import java.util.Optional;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ScreenPowerService {
 
     private final AdbService adbService;
@@ -35,6 +44,66 @@ public class ScreenPowerService {
     private final ScheduleRepository scheduleRepo;
     private final ScreenLogRepository logRepo;
     private final ScroffProperties props;
+
+    /**
+     * 自注入：{@link #controlAll} 内部并发调用 {@link #control} 时，
+     * 必须走 Spring 代理才能让 {@code @Transactional} 生效。
+     *
+     * <p><b>关于 @Lazy 必须在构造器参数上</b>：{@code @Lazy} 放在字段上 + Lombok
+     * {@code @RequiredArgsConstructor} 时，Lombok 不会把 {@code @Lazy} 传播到构造器
+     * 参数，Spring 仍然按字段类型直接注入真正的 bean，导致构造器循环引用（self ← self），
+     * Spring Boot 3.x 默认会拒绝启动并报
+     * "The dependencies of some of the beans form a cycle"。
+     * 解法：写显式构造器，把 {@code @Lazy} 直接放在参数上（参考 {@link DeviceManager}）。
+     */
+    private final ScreenPowerService self;
+
+    /** 批量控制专用线程池，与 adbPool、Tomcat 线程池都隔离 */
+    private ExecutorService batchPool;
+
+    public ScreenPowerService(AdbService adbService,
+                              DeviceManager deviceManager,
+                              DeviceRepository deviceRepo,
+                              ScheduleRepository scheduleRepo,
+                              ScreenLogRepository logRepo,
+                              ScroffProperties props,
+                              @Lazy ScreenPowerService self) {
+        this.adbService = adbService;
+        this.deviceManager = deviceManager;
+        this.deviceRepo = deviceRepo;
+        this.scheduleRepo = scheduleRepo;
+        this.logRepo = logRepo;
+        this.props = props;
+        this.self = self;
+    }
+
+    @PostConstruct
+    void initPool() {
+        // 8 个并发足够，太多会同时打满 adb server 和网络
+        AtomicInteger n = new AtomicInteger();
+        ThreadFactory tf = r -> {
+            Thread t = new Thread(r, "screen-batch-" + n.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        };
+        batchPool = Executors.newFixedThreadPool(8, tf);
+        log.info("ScreenPowerService 批量线程池就绪 (size=8)");
+    }
+
+    @PreDestroy
+    void shutdownPool() {
+        if (batchPool != null) {
+            batchPool.shutdown();
+            try {
+                if (!batchPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    batchPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                batchPool.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
 
     /**
      * 控制单台设备屏幕开关。返回执行结果消息。
@@ -119,5 +188,96 @@ public class ScreenPowerService {
         log.setMessage(message);
         log.setExecutedAt(LocalDateTime.now());
         logRepo.save(log);
+    }
+
+    /**
+     * 批量控制所有启用设备（"全部开"/"全部关"按钮专用）。
+     *
+     * <ul>
+     *   <li>只处理 {@code enabled = true} 的设备，禁用的跳过</li>
+     *   <li>并发执行，线程池 size = 8（与 Tomcat / adb pool 隔离）</li>
+     *   <li>每台设备的 adb 命令和 screen_log 写库相互独立（{@code @Transactional} 走 self 代理）</li>
+     *   <li>返回汇总消息，失败列表最多列 5 条避免 flash 过长</li>
+     * </ul>
+     *
+     * @return 给用户看的汇总消息
+     */
+    public BatchControlResult controlAll(boolean powerOn, ScreenLog.TriggerType trigger) {
+        List<Device> devices = deviceRepo.findAllByEnabledTrue();
+        if (devices.isEmpty()) {
+            return new BatchControlResult(0, 0, List.of(), "没有启用的设备");
+        }
+
+        String action = powerOn ? "开屏" : "关屏";
+        log.info("批量{}开始，设备数={}", action, devices.size());
+
+        // 并发提交到 batchPool。lambda 里调 self.control()，必须走代理才能触发 @Transactional
+        List<CompletableFuture<DeviceResult>> futures = new ArrayList<>(devices.size());
+        for (Device d : devices) {
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                try {
+                    String msg = self.control(d.getId(), powerOn, trigger);
+                    boolean ok = !(msg.contains("失败") || msg.contains("不在线")
+                            || msg.contains("不存在") || msg.contains("已禁用"));
+                    return new DeviceResult(d, ok, msg);
+                } catch (Exception e) {
+                    log.error("批量{}异常: device={}", action, d.getName(), e);
+                    return new DeviceResult(d, false, "异常: " + e.getMessage());
+                }
+            }, batchPool));
+        }
+
+        // 等所有完成（带超时保护，避免某一台卡死把整个批量卡住）
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(60, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("批量{}等待超时或中断，返回部分结果", action, e);
+        }
+
+        int success = 0, failed = 0;
+        List<String> failureMsgs = new ArrayList<>();
+        for (CompletableFuture<DeviceResult> f : futures) {
+            if (!f.isDone()) {
+                failed++;
+                failureMsgs.add("超时未返回");
+                continue;
+            }
+            DeviceResult r = f.join();
+            if (r.ok) {
+                success++;
+            } else {
+                failed++;
+                failureMsgs.add(r.device.getName() + ": " + r.message);
+            }
+        }
+
+        String summary = String.format("批量%s: %d/%d 成功", action, success, devices.size());
+        if (failed > 0) {
+            // 截断到 5 条，避免 flash 消息过长
+            List<String> shown = failureMsgs.size() > 5
+                    ? new ArrayList<>(failureMsgs.subList(0, 5))
+                    : failureMsgs;
+            if (failureMsgs.size() > 5) {
+                shown.add("... 还有 " + (failureMsgs.size() - 5) + " 个失败未显示");
+            }
+            summary += "，失败: " + String.join("; ", shown);
+        }
+        log.info("批量{}完成: {}", action, summary);
+        return new BatchControlResult(success, failed, failureMsgs, summary);
+    }
+
+    /** 单台设备执行结果（内部用） */
+    private record DeviceResult(Device device, boolean ok, String message) {}
+
+    /**
+     * 批量执行汇总结果（暴露给 Controller 用）。
+     */
+    public record BatchControlResult(int success, int failed,
+                                     List<String> failures,
+                                     String summary) {
+        public boolean allSuccess() {
+            return failed == 0;
+        }
     }
 }

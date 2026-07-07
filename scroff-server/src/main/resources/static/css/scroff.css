@@ -89,6 +89,181 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
     margin-bottom: 16px;
 }
 .page-header h1 { margin: 0; }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+
+/* 页面大小选择器：跟标题左对齐，紧贴在 page-header 下方 */
+.size-form {
+    margin: 0 0 12px 0;
+    color: #555;
+    font-size: 13px;
+}
+.size-form select {
+    padding: 3px 6px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+}
+.size-form select:hover { border-color: #888; }
+
+/* ---------- 通用 confirm 弹窗 ---------- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+.modal-overlay[hidden] { display: none; }
+.modal-box {
+    background: var(--bg, #fff);
+    color: var(--fg, #222);
+    padding: 20px 24px;
+    border-radius: 8px;
+    max-width: 640px;          /* 加宽，便于展示表格 */
+    width: 90%;
+    /* 高度限制：视口的 80%，并启用 flex 让内部元素各司其职 */
+    max-height: 80vh;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+.modal-title {
+    flex-shrink: 0;            /* 标题不参与挤压 */
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    color: #111;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+.modal-message {
+    flex: 1 1 auto;            /* 占据中间所有剩余空间 */
+    /* 关键：flex item 默认 min-height: auto 会让它撑到内容尺寸，
+       加 min-height: 0 才能让它缩到内容以下、触发 overflow-y 滚动。
+       不然表格超高时整个 modal 会被撑爆，超出 80vh 也无法滚动。 */
+    min-height: 0;
+    overflow-y: auto;          /* 关键：只让内容区滚动 */
+    overflow-x: auto;          /* 表格太宽也能横滚 */
+    margin: 0 0 12px 0;
+    line-height: 1.5;
+    white-space: pre-line;
+    word-break: break-word;
+    /* 自定义滚动条（Webkit） */
+    scrollbar-width: thin;
+    scrollbar-color: #c0c0c0 transparent;
+}
+.modal-message::-webkit-scrollbar { width: 8px; height: 8px; }
+.modal-message::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 4px; }
+.modal-message::-webkit-scrollbar-track { background: transparent; }
+/* 内容里的表格适配滚动区 */
+.modal-message table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+.modal-message th,
+.modal-message td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f0f0f0;
+    text-align: left;
+    vertical-align: top;
+}
+.modal-message th {
+    position: sticky;
+    top: 0;
+    background: #fafafa;
+    font-weight: 600;
+    color: #333;
+    z-index: 1;
+}
+.modal-buttons {
+    flex-shrink: 0;            /* 按钮不参与挤压 */
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    border-top: 1px solid #eee;
+    padding-top: 12px;
+    margin-top: 4px;
+}
+.modal-buttons .btn-hide {
+    background: none;
+    border: 1px dashed #bbb;
+    color: #666;
+    margin-right: auto; /* 推到最左边，跟取消/确定分开 */
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.modal-buttons .btn-hide:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+/* 蓝色信息按钮：用于"查屏状态"等只读操作 */
+.btn-info {
+    background: #2563eb;
+    color: #fff;
+    border: 1px solid #2563eb;
+}
+.btn-info:hover { background: #1d4ed8; }
+.btn-info:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
+
+/* ---------- 操作下拉菜单 ---------- */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+.dropdown-toggle { user-select: none; }
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 2px);
+    min-width: 140px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    z-index: 50;
+    padding: 4px 0;
+    font-size: 13px;
+}
+.dropdown.open .dropdown-menu { display: block; }
+.dropdown-menu form { display: block; }
+.dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 7px 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #222;
+    text-decoration: none;
+    font: inherit;
+    line-height: 1.4;
+    box-sizing: border-box;
+}
+.dropdown-item:hover { background: #f3f4f6; }
+.dropdown-item:active { background: #e5e7eb; }
+.dropdown-item:disabled { color: #aaa; cursor: not-allowed; background: none; }
+.dropdown-item.item-ok { color: #16a34a; }
+.dropdown-item.item-ok:hover { background: #f0fdf4; }
+.dropdown-item.item-warn { color: #d97706; }
+.dropdown-item.item-warn:hover { background: #fffbeb; }
+.dropdown-item.item-danger { color: #dc2626; }
+.dropdown-item.item-danger:hover { background: #fef2f2; }
+.dropdown-sep {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 4px 0;
+}
 
 /* ===== Cards ===== */
 .cards {
