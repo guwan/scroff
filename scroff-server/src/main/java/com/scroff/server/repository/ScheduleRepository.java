@@ -32,20 +32,32 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
                       @Param("msg") String msg);
 
     /**
-     * 查询同 cron 的"单台 mode"schedule 对应的 device_id 列表。
-     * 用于"所有设备 mode"触发时排除被单台 schedule 接管的设备，实现"单台 > 所有"优先级。
+     * 查询同 cron 的"指定设备 mode"schedule 对应的所有 device id。
+     * 用于"所有设备 mode"触发时排除被单台/multi schedule 接管的设备，实现"指定设备 > 所有设备"优先级。
      *
-     * <p>例：所有设备 schedule cron = "0 50 17 * * *"
-     *     设备 5 有单台 schedule cron = "0 50 17 * * *" （同 cron）→ 设备 5 被"接管"
-     *     设备 6 有单台 schedule cron = "0 55 17 * * *" （不同 cron）→ 设备 6 不被接管
-     *
-     * <p>只匹配 enabled=true + target_all=false + cron 相等的活跃 schedule。
-     * DISTINCT 处理"同一设备多个同 cron 单台 schedule"的去重。
+     * <p>实现：schedule_device 是独立关联表，JPQL JOIN s.deviceIds 直接拉平。
+     * 老数据兜底：对那些 device_ids 列还没迁移到 schedule_device、只有 device_id > 0 的 schedule，
+     * 再用原生 SQL UNION 补一轮。
      */
-    @Query("SELECT DISTINCT s.deviceId FROM Schedule s " +
-           "WHERE s.enabled = true " +
-           "AND s.targetAll = false " +
-           "AND s.cron = :cron " +
-           "AND s.deviceId IS NOT NULL")
+    @Query("""
+            SELECT DISTINCT d FROM Schedule s JOIN s.deviceIds d
+            WHERE s.enabled = true
+              AND s.targetAll = false
+              AND s.cron = :cron
+            """)
     List<Long> findOverridingDeviceIds(@Param("cron") String cron);
+
+    /**
+     * 兜底查询：老 schedule 还没迁移到 schedule_device，只有 device_id > 0 的情况。
+     * 与上面的 JPQL 结果 UNION 使用。
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT DISTINCT s.device_id FROM schedule s
+            WHERE s.enabled = 1
+              AND s.target_all = 0
+              AND s.cron = :cron
+              AND s.device_id > 0
+              AND NOT EXISTS (SELECT 1 FROM schedule_device sd WHERE sd.schedule_id = s.id)
+            """)
+    List<Long> findOverridingDeviceIdsLegacy(@Param("cron") String cron);
 }

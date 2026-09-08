@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.*;
 
 /**
  * REST API：浏览 Android 设备的文件系统和已安装应用。
@@ -207,6 +208,126 @@ public class FileBrowseController {
         result.put("ok", true);
         result.put("activities", activities);
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 批量校验多台设备上是否存在指定的文件或应用。
+     *
+     * <p>请求体：
+     * <pre>{
+     *   "deviceIds": [1, 2, 3],
+     *   "targetPath": "/sdcard/Movies/demo.mp4",
+     *   "action": "OPEN_FILE"  // 或 "OPEN_APP"
+     * }</pre>
+     *
+     * <p>响应：
+     * <pre>{
+     *   "ok": true,
+     *   "results": [
+     *     {"deviceId": 1, "deviceName": "叫号机-窗口1", "online": true, "exists": true, "detail": "ls 输出一行 /sdcard/Movies/demo.mp4"},
+     *     {"deviceId": 2, "deviceName": "叫号机-窗口2", "online": false, "exists": false, "detail": "设备不在线"}
+     *   ],
+     *   "summary": "2/3 台设备通过校验"
+     * }</pre>
+     */
+    @PostMapping("/validate-target")
+    public ResponseEntity<Map<String, Object>> validateTarget(@RequestBody Map<String, Object> body) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        @SuppressWarnings("unchecked")
+        List<Number> idNumbers = (List<Number>) body.get("deviceIds");
+        String targetPath = body.get("targetPath") != null ? body.get("targetPath").toString() : "";
+        String action = body.get("action") != null ? body.get("action").toString().toUpperCase() : "";
+
+        if (idNumbers == null || idNumbers.isEmpty()) {
+            result.put("ok", false);
+            result.put("error", "未指定任何设备");
+            return ResponseEntity.badRequest().body(result);
+        }
+        if (targetPath.isBlank()) {
+            result.put("ok", false);
+            result.put("error", "targetPath 不能为空");
+            return ResponseEntity.badRequest().body(result);
+        }
+        boolean isOpenApp = "OPEN_APP".equals(action);
+
+        List<Long> ids = idNumbers.stream().map(Number::longValue).toList();
+        Map<Long, Device> deviceMap = new HashMap<>();
+        deviceRepo.findAllById(ids).forEach(d -> deviceMap.put(d.getId(), d));
+
+        // 并发校验每台设备
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(8, ids.size()));
+        List<CompletableFuture<Map<String, Object>>> futures = new ArrayList<>(ids.size());
+        for (Long id : ids) {
+            futures.add(CompletableFuture.supplyAsync(() -> checkOne(id, deviceMap.get(id), targetPath, isOpenApp), pool));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("校验等待超时", e);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        List<Map<String, Object>> results = futures.stream()
+                .<Map<String, Object>>map(f -> {
+                    if (f.isDone()) return f.join();
+                    Map<String, Object> timeoutMap = new LinkedHashMap<>();
+                    timeoutMap.put("timeout", true);
+                    return timeoutMap;
+                })
+                .toList();
+
+        long pass = results.stream().filter(r -> Boolean.TRUE.equals(r.get("exists"))).count();
+        String summary = String.format("%d/%d 台设备通过校验", pass, results.size());
+
+        result.put("ok", true);
+        result.put("summary", summary);
+        result.put("results", results);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 校验单台设备的文件/应用是否存在。返回一个结果字典。
+     */
+    private Map<String, Object> checkOne(Long id, Device device, String targetPath, boolean isOpenApp) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("deviceId", id);
+        if (device == null) {
+            r.put("deviceName", "(设备不存在)");
+            r.put("online", false);
+            r.put("exists", false);
+            r.put("detail", "设备记录不存在");
+            return r;
+        }
+        r.put("deviceName", device.getName());
+
+        if (!adbService.isOnline(device.getAddress())) {
+            r.put("online", false);
+            r.put("exists", false);
+            r.put("detail", "设备不在线");
+            return r;
+        }
+        r.put("online", true);
+
+        AdbResult ar;
+        if (isOpenApp) {
+            // 取包名部分：如果 target 是 component 格式 (pkg/.Activity)，取 pkg 部分
+            String pkg = targetPath.contains("/") ? targetPath.substring(0, targetPath.indexOf('/')) : targetPath;
+            ar = adbService.execShell(device.getAddress(), "pm path " + shellEscape(pkg));
+            boolean exists = ar.isSuccess() && (ar.getStdout() != null && ar.getStdout().contains(pkg));
+            r.put("exists", exists);
+            r.put("detail", exists ? "应用已安装: " + ar.getStdout().trim() : ("未找到应用 " + pkg + ": " + ar.getErrorMessage()));
+        } else {
+            // 文件校验：用 ls 检查
+            String safePath = shellEscape(targetPath);
+            ar = adbService.execShell(device.getAddress(), "ls -la " + safePath);
+            boolean exists = ar.isSuccess() && ar.getStdout() != null && !ar.getStdout().isBlank()
+                    && !ar.getStdout().contains("No such file");
+            r.put("exists", exists);
+            r.put("detail", exists ? "文件存在" : ("文件不存在: " + ar.getErrorMessage()));
+        }
+        return r;
     }
 
     // ------------------------------------------------------------------

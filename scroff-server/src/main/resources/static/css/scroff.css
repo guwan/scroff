@@ -650,3 +650,122 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
     display: flex;
     justify-content: space-between;
 }
+
+/* ===== Multi-Select（搜索 + checkbox + tag） ===== */
+.multi-select {
+    position: relative;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    background: #fff;
+    padding: 6px 8px;
+    min-height: 40px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    cursor: text;
+}
+.multi-select:focus-within { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.1); }
+
+.ms-tags { display: contents; }
+.ms-tag {
+    background: #dbeafe;
+    color: #1e40af;
+    padding: 2px 4px 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    line-height: 1.5;
+}
+.ms-tag-label { display: inline-flex; align-items: baseline; }
+.ms-tag-label .ms-sub {
+    color: #6b7280;
+    font-size: 10px;
+    margin-left: 2px;
+}
+.ms-tag-x {
+    cursor: pointer;
+    padding: 0 4px;
+    font-weight: bold;
+    color: #1e40af;
+    user-select: none;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+}
+.ms-tag-x:hover { background: #bfdbfe; color: #1e3a8a; }
+
+.ms-search {
+    flex: 1 1 auto;
+    min-width: 140px;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    background: transparent;
+    padding: 2px 4px;
+    color: var(--c-text);
+    line-height: 1.6;
+}
+.ms-search::placeholder { color: #9ca3af; }
+
+.ms-panel {
+    position: absolute;
+    top: 100%;
+    left: -1px;
+    right: -1px;
+    margin-top: 4px;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    background: #fff;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 500;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.ms-panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ms-row { cursor: pointer; transition: background 0.1s; }
+.ms-row:hover { background: #f3f4f6; }
+.ms-row.ms-checked { background: #eff6ff; }
+.ms-row.ms-disabled { opacity: 0.5; cursor: not-allowed; }
+.ms-row.ms-disabled:hover { background: #f9fafb; }
+.ms-row td { padding: 6px 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+.ms-row td input[type="checkbox"] { cursor: pointer; }
+.ms-row-name { font-weight: 500; color: var(--c-text); }
+.ms-row-name .ms-sub { color: #6b7280; font-size: 11.5px; font-weight: normal; margin-left: 2px; }
+.ms-disabled-hint { color: #9ca3af; font-size: 11px; }
+
+/* ===== 校验结果区域 ===== */
+.validate-result {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    font-size: 13px;
+}
+.validate-summary {
+    font-weight: 600;
+    color: var(--c-text);
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 4px;
+}
+.validate-result table th {
+    background: #f1f5f9;
+    font-weight: 600;
+    color: #475569;
+}
+.validate-result table td,
+.validate-result table th { border-bottom: 1px solid #e5e7eb; }
+
+/* ===== .ms-sub 通用子标签样式（tag 内的次要文本） ===== */
+.ms-sub { color: #6b7280; font-size: 11.5px; }
+

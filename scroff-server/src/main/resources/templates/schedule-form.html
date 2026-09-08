@@ -10,7 +10,7 @@
 
     <form method="post"
           th:action="${schedule != null} ? @{'/schedules/' + ${schedule.id}} : @{/schedules}"
-          th:object="${form}" class="form">
+          th:object="${form}" class="form" id="scheduleForm">
         <div class="field">
             <label>名称 *</label>
             <input type="text" th:field="*{name}" required maxlength="100"
@@ -24,7 +24,7 @@
                 <label class="radio">
                     <input type="radio" name="targetAll" value="false"
                            th:checked="${form.targetAll == null or !form.targetAll}">
-                    <span>单台设备</span>
+                    <span>指定设备</span>
                 </label>
                 <label class="radio">
                     <input type="radio" name="targetAll" value="true"
@@ -32,21 +32,38 @@
                     <span>所有设备（同时控制多台）</span>
                 </label>
             </div>
-            <div class="err"
-                 th:if="${#fields.hasErrors('deviceIdValidForScope')}"
-                 th:errors="*{deviceIdValidForScope}"></div>
         </div>
 
-        <div class="field" id="deviceIdField">
+        <!-- 指定设备模式：搜索式多选控件 -->
+        <div class="field" id="deviceIdsField">
             <label>设备 *</label>
-            <select th:field="*{deviceId}">
-                <option value="">-- 请选择 --</option>
-                <option th:each="d : ${devices}"
-                        th:value="${d.id}"
-                        th:text="${d.name + ' (' + d.address + ')'}">--</option>
-            </select>
-            <div class="err" th:if="${#fields.hasErrors('deviceId')}" th:errors="*{deviceId}"></div>
-            <div class="err" th:if="${#fields.hasErrors('deviceIdValidForScope')}" th:errors="*{deviceIdValidForScope}"></div>
+
+            <div class="multi-select">
+                <!-- 已选设备 tag 展示 -->
+                <div class="ms-tags" id="msTags"></div>
+
+                <!-- 搜索框 -->
+                <input type="text" id="msSearch" class="ms-search" placeholder="搜索设备名称或地址..." autocomplete="off">
+
+                <!-- 下拉面板：checkbox 列表 -->
+                <div class="ms-panel" id="msPanel" hidden>
+                    <table style="width:100%;margin:0;border-collapse:collapse;">
+                        <tbody id="msListBody"></tbody>
+                    </table>
+                </div>
+
+                <!-- 隐藏 input：手动绑定 name/value，避免 th:field 覆盖显式 id -->
+                <input type="hidden" name="deviceIds" th:value="${form.deviceIds}" id="deviceIdsHidden">
+            </div>
+            <small class="hint" id="msHint">支持搜索后勾选多台设备，点击 tag 上的 × 可移除</small>
+
+            <!-- 设备校验按钮（仅 OPEN_FILE/OPEN_APP 时显示） -->
+            <div id="validateWrap" style="display:none;margin-top:8px;">
+                <button type="button" class="btn btn-sm" id="validateBtn">🔍 校验文件/应用存在性</button>
+                <div id="validateResult" class="validate-result"></div>
+            </div>
+
+            <div class="err" th:if="${#fields.hasErrors('deviceIdsValidForScope')}" th:errors="*{deviceIdsValidForScope}"></div>
         </div>
 
         <div class="field">
@@ -109,13 +126,10 @@
 <div id="browserModal" class="modal-overlay" hidden>
     <div class="modal-box">
         <h3 class="modal-title" id="browserTitle">浏览文件</h3>
-        <div class="modal-message" id="browserContent">
-            <!-- 动态内容注入 -->
-        </div>
+        <div class="modal-message" id="browserContent">加载中...</div>
         <div class="modal-buttons">
             <button type="button" class="btn" id="browserRefreshBtn">刷新</button>
-            <button type="button" class="btn btn-primary" id="browserSelectBtn" style="display:none">选择此文件</button>
-            <button type="button" class="btn" id="browserCancelBtn">取消</button>
+            <button type="button" class="btn btn-default" id="browserCancelBtn">取消</button>
         </div>
     </div>
 </div>
@@ -123,14 +137,24 @@
 <footer th:replace="~{_layout :: footer}"></footer>
 
 <script th:inline="javascript">
-    /* 单台/全部切换：选中"全部"时隐藏设备下拉框 */
+    /* ========== 后端设备列表注入成 JS 变量 ========== */
+    var ALL_DEVICES = /*[[${devices}]]*/ [];
+    // ALL_DEVICES 元素形如 {id, name, address, enabled}
+    // 初始选中 IDs（从 form.deviceIds hidden input 解析出来）
+    var initialDeviceIds = (function() {
+        var v = document.getElementById('deviceIdsHidden').value;
+        if (!v) return [];
+        return v.split(',').map(s => s.trim()).filter(Boolean).map(Number);
+    })();
+
+    /* ========== 目标模式切换 ========== */
     function updateTargetMode() {
         var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
-        var deviceField = document.getElementById('deviceIdField');
+        var deviceField = document.getElementById('deviceIdsField');
         if (allRadio && allRadio.checked) {
             deviceField.style.display = 'none';
-            var sel = deviceField.querySelector('select');
-            if (sel) sel.value = '';
+            // 清空隐藏 input
+            document.getElementById('deviceIdsHidden').value = '';
         } else {
             deviceField.style.display = '';
         }
@@ -140,17 +164,125 @@
     });
     updateTargetMode();
 
-    /* 快捷预设按钮 */
-    document.querySelectorAll('.preset-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var cron = btn.getAttribute('data-cron');
-            var input = document.getElementById('cronInput');
-            input.value = cron;
-            input.focus();
-        });
-    });
+    /* ============ 多选控件逻辑 ============ */
+    var MultiSelect = (function () {
+        var selectedIds = new Set(initialDeviceIds);
+        var tagsEl = document.getElementById('msTags');
+        var searchEl = document.getElementById('msSearch');
+        var panelEl = document.getElementById('msPanel');
+        var bodyEl = document.getElementById('msListBody');
+        var hiddenEl = document.getElementById('deviceIdsHidden');
 
-    /* ============ 动作切换：显示/隐藏 targetPath 字段 ============ */
+        function renderTags() {
+            tagsEl.innerHTML = '';
+            if (selectedIds.size === 0) return;
+            var orderArr = Array.from(selectedIds); // 保持插入顺序的数组
+            var sortedDevices = ALL_DEVICES.filter(function(d){ return selectedIds.has(d.id); })
+                                          .sort(function(a,b){ return orderArr.indexOf(a.id) - orderArr.indexOf(b.id); });
+            sortedDevices.forEach(function (d) {
+                var tag = document.createElement('span');
+                tag.className = 'ms-tag';
+                tag.innerHTML = '<span class="ms-tag-label">' + escapeHtml(d.name) + ' <span class="ms-sub">' + escapeHtml(d.address) + '</span></span>'
+                               + '<span class="ms-tag-x" data-id="' + d.id + '">×</span>';
+                tagsEl.appendChild(tag);
+            });
+            // 绑定 × 点击
+            tagsEl.querySelectorAll('.ms-tag-x').forEach(function (x) {
+                x.addEventListener('click', function () {
+                    selectedIds.delete(Number(x.getAttribute('data-id')));
+                    syncHidden();
+                    renderTags();
+                    renderList();
+                });
+            });
+        }
+
+        function renderList() {
+            var kw = searchEl.value.toLowerCase().trim();
+            var html = '';
+            var anyShown = false;
+            ALL_DEVICES.forEach(function (d) {
+                var match = !kw
+                    || (d.name && d.name.toLowerCase().indexOf(kw) >= 0)
+                    || (d.address && d.address.toLowerCase().indexOf(kw) >= 0);
+                if (!match) return;
+                anyShown = true;
+                var checked = selectedIds.has(d.id);
+                var enabled = d.enabled !== false; // null 视为 true
+                var cls = 'ms-row' + (checked ? ' ms-checked' : '') + (enabled ? '' : ' ms-disabled');
+                html += '<tr class="' + cls + '" data-id="' + d.id + '">'
+                      + '<td style="width:24px;"><input type="checkbox" '
+                      + (checked ? 'checked' : '')
+                      + (enabled ? '' : ' disabled')
+                      + ' class="ms-cb"></td>'
+                      + '<td><div class="ms-row-main">'
+                      + '<div class="ms-row-name">' + escapeHtml(d.name)
+                      + '<span class="ms-sub">(' + escapeHtml(d.address) + ')</span></div>'
+                      + (enabled ? '' : '<div class="ms-disabled-hint">已禁用</div>')
+                      + '</div></td>'
+                      + '</tr>';
+            });
+            if (!anyShown) {
+                html = '<tr><td colspan="2" style="padding:10px;color:#999;text-align:center;">无匹配设备</td></tr>';
+            }
+            bodyEl.innerHTML = html;
+
+            bodyEl.querySelectorAll('.ms-cb').forEach(function (cb) {
+                cb.addEventListener('change', function () {
+                    var row = cb.closest('.ms-row');
+                    var id = Number(row.getAttribute('data-id'));
+                    if (cb.checked) selectedIds.add(id);
+                    else selectedIds.delete(id);
+                    syncHidden();
+                    renderTags();
+                    renderList();
+                });
+            });
+            // 整行点击也 toggle（checkbox 本身也能点）
+            bodyEl.querySelectorAll('.ms-row').forEach(function (row) {
+                row.addEventListener('click', function (e) {
+                    if (e.target.tagName === 'INPUT') return;
+                    var cb = row.querySelector('.ms-cb');
+                    if (!cb.disabled) {
+                        cb.checked = !cb.checked;
+                        cb.dispatchEvent(new Event('change'));
+                    }
+                });
+            });
+        }
+
+        function syncHidden() {
+            hiddenEl.value = Array.from(selectedIds).join(',');
+        }
+
+        function openPanel() {
+            renderList();
+            panelEl.hidden = false;
+        }
+        function closePanel() {
+            panelEl.hidden = true;
+        }
+        function togglePanel() {
+            if (panelEl.hidden) openPanel(); else closePanel();
+        }
+
+        searchEl.addEventListener('focus', openPanel);
+        searchEl.addEventListener('input', renderList);
+        // 点别处关闭
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.multi-select')) closePanel();
+        });
+
+        renderTags();
+
+        return {
+            getSelected: function () { return Array.from(selectedIds); },
+            getFirst: function () { var arr = Array.from(selectedIds); return arr.length > 0 ? arr[0] : null; },
+            syncHidden: syncHidden
+        };
+    })();
+
+    /* ============ 动作切换 ============ */
     function updateActionField() {
         var sel = document.getElementById('actionSelect');
         var action = sel ? sel.value : '';
@@ -158,6 +290,7 @@
         var pathLabel = document.getElementById('targetPathLabel');
         var pathHint = document.getElementById('targetPathHint');
         var browseBtn = document.getElementById('browseBtn');
+        var validateWrap = document.getElementById('validateWrap');
         var browseTitle = document.getElementById('browserTitle');
 
         if (action === 'OPEN_FILE') {
@@ -166,160 +299,126 @@
             pathHint.textContent = 'Android 设备上的文件路径，如 /sdcard/Movies/demo.mp4。支持视频 / 图片 / 文档等。';
             browseBtn.textContent = '浏览文件';
             browseTitle.textContent = '浏览设备文件';
+            validateWrap.style.display = '';
         } else if (action === 'OPEN_APP') {
             pathField.style.display = '';
             pathLabel.textContent = '应用包名或 Component *';
-            pathHint.textContent = '如 com.example.app 或 com.example.app/.MainActivity。留 component 更精准。';
+            pathHint.textContent = '如 com.example.app 或 com.example.app/.MainActivity。';
             browseBtn.textContent = '浏览应用';
             browseTitle.textContent = '选择已安装应用';
+            validateWrap.style.display = '';
         } else {
             pathField.style.display = 'none';
+            validateWrap.style.display = 'none';
         }
     }
     document.getElementById('actionSelect').addEventListener('change', updateActionField);
-    // 初始状态也触发一次（编辑时从服务器渲染的值）
     updateActionField();
 
     /* ============ 浏览模态框 ============ */
     var browserModal = document.getElementById('browserModal');
     var browserContent = document.getElementById('browserContent');
-    var browserSelectBtn = document.getElementById('browserSelectBtn');
     var browserRefreshBtn = document.getElementById('browserRefreshBtn');
-    var currentActionMode = 'OPEN_FILE'; // 'OPEN_FILE' 或 'OPEN_APP'
+    var browserCancelBtn = document.getElementById('browserCancelBtn');
+    var currentActionMode = 'OPEN_FILE';
     var currentBrowsePath = '/sdcard';
+
+    function getFirstSelectedDeviceId(allowAllMode) {
+        var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
+        if (allRadio && allRadio.checked) {
+            if (allowAllMode) return null;
+            alert('浏览功能需要先指定一台设备。请切换到"指定设备"模式并勾选设备后再浏览。');
+            return null;
+        }
+        var firstId = MultiSelect.getFirst();
+        if (!firstId) {
+            alert('请先勾选至少一台设备');
+            return null;
+        }
+        return firstId;
+    }
 
     function openBrowser() {
         var sel = document.getElementById('actionSelect');
         currentActionMode = sel.value;
-
-        // 单台模式下直接用选中的设备；全部模式时让用户先选一台
-        var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
-        var isAllMode = allRadio && allRadio.checked;
-
-        if (isAllMode) {
-            alert('浏览功能需要先指定一台具体设备。请切换到"单台设备"模式并选择设备后再浏览。');
-            return;
-        }
-
-        var deviceSel = document.getElementById('deviceIdField').querySelector('select');
-        var deviceId = deviceSel.value;
-        if (!deviceId) {
-            alert('请先在上方选择一台设备');
-            return;
-        }
+        var deviceId = getFirstSelectedDeviceId(false);
+        if (!deviceId) return;
 
         browserModal.hidden = false;
         if (currentActionMode === 'OPEN_APP') {
             loadPackages(deviceId);
         } else {
-            // 如果 targetPath 已有值，从该目录开始
             var existing = document.getElementById('targetPathInput').value;
             currentBrowsePath = extractDir(existing) || '/sdcard';
             loadDir(deviceId, currentBrowsePath);
         }
     }
 
-    function closeBrowser() {
-        browserModal.hidden = true;
-    }
-
-    browserModal.addEventListener('click', function (e) {
-        if (e.target === browserModal) closeBrowser();
-    });
-    document.getElementById('browserCancelBtn').addEventListener('click', closeBrowser);
+    function closeBrowser() { browserModal.hidden = true; }
+    browserModal.addEventListener('click', function (e) { if (e.target === browserModal) closeBrowser(); });
+    browserCancelBtn.addEventListener('click', closeBrowser);
     browserRefreshBtn.addEventListener('click', function () {
-        var deviceSel = document.getElementById('deviceIdField').querySelector('select');
-        var deviceId = deviceSel.value;
+        var deviceId = MultiSelect.getFirst();
         if (deviceId) {
             if (currentActionMode === 'OPEN_APP') loadPackages(deviceId);
             else loadDir(deviceId, currentBrowsePath);
         }
     });
 
-    /* 从已有路径里提取目录部分 */
     function extractDir(p) {
         if (!p) return null;
-        // 去掉末尾文件名，保留目录
         var idx = p.lastIndexOf('/');
         if (idx <= 0) return '/sdcard';
         return p.substring(0, idx) || '/';
     }
 
-    /* ============ 文件浏览 ============ */
     function loadDir(deviceId, path) {
         currentBrowsePath = path;
         browserContent.innerHTML = '<div class="muted">加载中...</div>';
-        browserSelectBtn.style.display = 'none';
-
         fetch('/api/devices/' + deviceId + '/browse?path=' + encodeURIComponent(path))
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                renderFileBrowser(data, deviceId);
-            })
-            .catch(function (e) {
-                browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>';
-            });
+            .then(function(r){ return r.json(); })
+            .then(function(data){ renderFileBrowser(data, deviceId); })
+            .catch(function(e){ browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>'; });
     }
 
     function renderFileBrowser(data, deviceId) {
-        if (!data.ok) {
-            browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>';
-            return;
-        }
-
-        var html = '';
-        // 面包屑导航
-        html += '<div style="margin-bottom:10px;font-size:13px;color:#666;">';
-        html += '<strong>当前：</strong>' + escapeHtml(data.path) + ' → ';
+        if (!data.ok) { browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>'; return; }
+        var html = '<div style="margin-bottom:10px;font-size:13px;color:#666;">'
+                 + '<strong>当前：</strong>' + escapeHtml(data.path) + ' → ';
         if (data.parentPath && data.parentPath !== data.path) {
             html += '<a href="javascript:void(0)" data-path="' + escapeHtmlAttr(data.parentPath) + '" class="nav-up">↑ 上一级</a>';
         }
         html += '</div>';
-
         if (!data.entries || data.entries.length === 0) {
             html += '<div class="muted" style="text-align:center;padding:30px;">目录为空</div>';
         } else {
             html += '<table><thead><tr><th style="width:24px"></th><th>名称</th><th style="width:80px">类型</th></tr></thead><tbody>';
             data.entries.forEach(function (e) {
                 var icon = e.isDir ? '📁' : getFileIcon(e.extension);
-                var rowClass = e.isDir ? ' class="dir-row"' : ' class="file-row"';
-                html += '<tr' + rowClass + ' data-name="' + escapeHtmlAttr(e.name) + '" data-isdir="' + e.isDir + '">';
-                html += '<td>' + icon + '</td>';
-                html += '<td>' + escapeHtml(e.name) + '</td>';
-                html += '<td class="muted">' + (e.isDir ? '目录' : (e.extension || '-')) + '</td>';
-                html += '</tr>';
+                var rowClass = e.isDir ? ' dir-row' : ' file-row';
+                html += '<tr class="' + rowClass + '" data-name="' + escapeHtmlAttr(e.name) + '">'
+                      + '<td>' + icon + '</td>'
+                      + '<td>' + escapeHtml(e.name) + '</td>'
+                      + '<td class="muted">' + (e.isDir ? '目录' : (e.extension || '-')) + '</td></tr>';
             });
             html += '</tbody></table>';
         }
-
         browserContent.innerHTML = html;
-
-        // 绑定点击事件
         browserContent.querySelectorAll('.nav-up').forEach(function (a) {
-            a.addEventListener('click', function () {
-                loadDir(deviceId, a.getAttribute('data-path'));
-            });
+            a.addEventListener('click', function () { loadDir(deviceId, a.getAttribute('data-path')); });
         });
         browserContent.querySelectorAll('.dir-row').forEach(function (row) {
             row.style.cursor = 'pointer';
             row.addEventListener('click', function () {
                 var name = row.getAttribute('data-name');
-                var newPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
-                loadDir(deviceId, newPath);
+                loadDir(deviceId, (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name);
             });
         });
         browserContent.querySelectorAll('.file-row').forEach(function (row) {
             row.style.cursor = 'pointer';
             row.addEventListener('click', function () {
                 var name = row.getAttribute('data-name');
-                var fullPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
-                document.getElementById('targetPathInput').value = fullPath;
-                closeBrowser();
-            });
-            row.addEventListener('dblclick', function () {
-                var name = row.getAttribute('data-name');
-                var fullPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
-                document.getElementById('targetPathInput').value = fullPath;
+                document.getElementById('targetPathInput').value = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
                 closeBrowser();
             });
         });
@@ -328,72 +427,52 @@
     function getFileIcon(ext) {
         if (!ext) return '📄';
         ext = ext.toLowerCase();
-        if (['mp4', '3gp', 'mkv', 'avi', 'mov', 'wmv', 'ts'].includes(ext)) return '🎬';
-        if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return '🖼️';
-        if (['mp3', 'wav', 'flac', 'aac'].includes(ext)) return '🎵';
-        if (['txt', 'log', 'md'].includes(ext)) return '📄';
+        if (['mp4','3gp','mkv','avi','mov','wmv','ts'].includes(ext)) return '🎬';
+        if (['jpg','jpeg','png','gif','bmp','webp'].includes(ext)) return '🖼️';
+        if (['mp3','wav','flac','aac'].includes(ext)) return '🎵';
         if (['pdf'].includes(ext)) return '📕';
-        if (['apk'].includes(ext)) return '📦';
         return '📄';
     }
 
-    /* ============ 应用浏览 ============ */
     function loadPackages(deviceId) {
         browserContent.innerHTML = '<div class="muted">加载中...</div>';
-        browserSelectBtn.style.display = 'none';
-
         fetch('/api/devices/' + deviceId + '/packages')
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                renderPackageList(data);
-            })
-            .catch(function (e) {
-                browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>';
-            });
+            .then(function(r){ return r.json(); })
+            .then(function(data){ renderPackageList(data); })
+            .catch(function(e){ browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>'; });
     }
 
     function renderPackageList(data) {
-        if (!data.ok) {
-            browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>';
-            return;
-        }
+        if (!data.ok) { browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>'; return; }
         var pkgs = data.packages || [];
-        var html = '<div style="margin-bottom:10px;">';
-        html += '<input type="text" id="pkgSearch" placeholder="输入包名过滤..." style="width:100%;padding:6px 10px;border:1px solid var(--c-border);border-radius:4px;font-size:13px;">';
-        html += '</div>';
-        html += '<table><thead><tr><th>包名</th></tr></thead><tbody id="pkgListBody">';
+        var html = '<div style="margin-bottom:10px;">'
+                 + '<input type="text" id="pkgSearch" placeholder="输入包名过滤..." '
+                 + 'style="width:100%;padding:6px 10px;border:1px solid var(--c-border);border-radius:4px;font-size:13px;">'
+                 + '</div>'
+                 + '<table><thead><tr><th>包名</th></tr></thead><tbody id="pkgListBody">';
         pkgs.forEach(function (p) {
-            html += '<tr class="pkg-row" data-pkg="' + escapeHtmlAttr(p.package) + '">';
-            html += '<td style="cursor:pointer;">📦 ' + escapeHtml(p.package) + '</td>';
-            html += '</tr>';
+            html += '<tr class="pkg-row" data-pkg="' + escapeHtmlAttr(p.package) + '">'
+                  + '<td style="cursor:pointer;">📦 ' + escapeHtml(p.package) + '</td></tr>';
         });
         html += '</tbody></table>';
         browserContent.innerHTML = html;
-
-        // 搜索过滤
         var search = document.getElementById('pkgSearch');
+        search.focus();
         search.addEventListener('input', function () {
             var kw = search.value.toLowerCase();
-            var rows = browserContent.querySelectorAll('.pkg-row');
-            rows.forEach(function (r) {
-                var pkg = r.getAttribute('data-pkg').toLowerCase();
-                r.style.display = (pkg.indexOf(kw) >= 0) ? '' : 'none';
+            browserContent.querySelectorAll('.pkg-row').forEach(function (r) {
+                r.style.display = r.getAttribute('data-pkg').toLowerCase().indexOf(kw) >= 0 ? '' : 'none';
             });
         });
-        search.focus();
-
-        // 点击选择
         browserContent.querySelectorAll('.pkg-row').forEach(function (row) {
             row.style.cursor = 'pointer';
             row.addEventListener('click', function () {
-                var pkg = row.getAttribute('data-pkg');
-                document.getElementById('targetPathInput').value = pkg;
+                document.getElementById('targetPathInput').value = row.getAttribute('data-pkg');
                 closeBrowser();
             });
         });
     }
 
-    /* ============ 工具函数 ============ */
     function escapeHtml(s) {
         if (s == null) return '';
         return String(s).replace(/[&<>]/g, function (c) {
@@ -407,8 +486,56 @@
         });
     }
 
-    /* ============ 浏览按钮触发 ============ */
+    /* ============ 浏览按钮 & 校验按钮 ============ */
     document.getElementById('browseBtn').addEventListener('click', openBrowser);
+
+    document.getElementById('validateBtn').addEventListener('click', function () {
+        var deviceIds = MultiSelect.getSelected();
+        var action = document.getElementById('actionSelect').value;
+        var targetPath = document.getElementById('targetPathInput').value.trim();
+        if (deviceIds.length === 0) { alert('请先勾选设备'); return; }
+        if (!targetPath) { alert('请先填写目标路径'); return; }
+        if (action !== 'OPEN_FILE' && action !== 'OPEN_APP') {
+            alert('只有"打开文件/打开应用"动作才需要校验'); return;
+        }
+        var resultEl = document.getElementById('validateResult');
+        resultEl.innerHTML = '<div class="muted">校验中（' + deviceIds.length + ' 台）...</div>';
+
+        fetch('/api/devices/validate-target', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                deviceIds: deviceIds,
+                targetPath: targetPath,
+                action: action
+            })
+        }).then(function(r){ return r.json(); })
+          .then(function(data){ renderValidateResult(data, resultEl); })
+          .catch(function(e){ resultEl.innerHTML = '<div class="err">校验请求失败: ' + e.message + '</div>'; });
+    });
+
+    function renderValidateResult(data, el) {
+        if (!data.ok) { el.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>'; return; }
+        var summary = data.summary || '';
+        var html = '<div class="validate-summary">' + escapeHtml(summary) + '</div>';
+        html += '<table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:13px;">'
+              + '<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;">设备</th>'
+              + '<th style="padding:6px 8px;text-align:left;">在线</th>'
+              + '<th style="padding:6px 8px;text-align:left;">存在</th>'
+              + '<th style="padding:6px 8px;text-align:left;">详情</th></tr></thead><tbody>';
+        data.results.forEach(function (r) {
+            var onlineTag = r.online ? '<span class="tag tag-ok">在线</span>' : '<span class="tag tag-offline">离线</span>';
+            var existsTag = r.exists ? '<span class="tag tag-ok">通过</span>' : '<span class="tag tag-err">不通过</span>';
+            html += '<tr>'
+                  + '<td style="padding:6px 8px;">' + escapeHtml(r.deviceName) + '</td>'
+                  + '<td style="padding:6px 8px;">' + onlineTag + '</td>'
+                  + '<td style="padding:6px 8px;">' + existsTag + '</td>'
+                  + '<td style="padding:6px 8px;color:#666;">' + escapeHtml(r.detail || '') + '</td>'
+                  + '</tr>';
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
 </script>
 </body>
 </html>

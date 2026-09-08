@@ -20,9 +20,13 @@ import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * 定时任务管理页面。
@@ -43,8 +47,29 @@ public class ScheduleController {
     public String list(@RequestParam(defaultValue = "0") int page,
                        @RequestParam(defaultValue = "20") int size,
                        Model model) {
-        model.addAttribute("page",
-                scheduleRepo.findAll(PageRequest.of(page, size, Sort.by("id").ascending())));
+        var pageResult = scheduleRepo.findAll(PageRequest.of(page, size, Sort.by("id").ascending()));
+        model.addAttribute("page", pageResult);
+
+        // 给每个 schedule 计算 deviceName 展示：所有设备模式 → "所有设备"；指定设备模式 → 用 getDeviceIdList() 拼名字
+        Map<Long, String> deviceNamesForSchedule = new LinkedHashMap<>();
+        var allDevices = deviceRepo.findAll();
+        Map<Long, String> idToName = new LinkedHashMap<>();
+        allDevices.forEach(d -> idToName.put(d.getId(), d.getName() + " (" + d.getAddress() + ")"));
+        model.addAttribute("deviceMap", idToName);
+
+        for (Schedule s : pageResult.getContent()) {
+            if (s.isForAllDevices()) {
+                deviceNamesForSchedule.put(s.getId(), "📺 所有设备");
+            } else {
+                List<String> names = new ArrayList<>();
+                for (Long did : s.getDeviceIdList()) {
+                    String nm = idToName.getOrDefault(did, "(已删除)");
+                    names.add(nm);
+                }
+                deviceNamesForSchedule.put(s.getId(), String.join(", ", names));
+            }
+        }
+        model.addAttribute("deviceNamesForSchedule", deviceNamesForSchedule);
         return "schedules";
     }
 
@@ -81,8 +106,9 @@ public class ScheduleController {
         }
         Schedule s = opt.get();
         ScheduleForm f = new ScheduleForm();
-        // 全部模式下 deviceId 填 0 占位，这里还原成 null 避免误导用户
-        f.setDeviceId(s.isForAllDevices() ? null : s.getDeviceId());
+        // 全部模式 → deviceIds 填空；指定设备模式 → 把 entity.getDeviceIdList() 序列化成逗号串
+        List<Long> ids = s.getDeviceIdList();
+        f.setDeviceIds(ids.stream().map(String::valueOf).collect(Collectors.joining(",")));
         f.setTargetAll(s.getTargetAll());
         f.setName(s.getName());
         f.setAction(s.getAction());
@@ -142,22 +168,32 @@ public class ScheduleController {
     }
 
     private void applyForm(Schedule s, ScheduleForm f) {
-        // ⚠ 关键：之前漏了 setTargetAll，导致 form 提交什么值都不会生效
-        // 表现：用户选"所有设备"保存后，列表仍显示"单台"+(已删除)；
-        //       编辑后再点编辑，targetAll 永远不保留。
         boolean all = Boolean.TRUE.equals(f.getTargetAll());
         s.setTargetAll(all);
-        // 全部模式下 deviceId 存 0（DB NOT NULL 约束兜底），executor 通过 isForAllDevices() 判定
-        // 单台模式下用 form 提交的 deviceId（可能是 null，但 @AssertTrue 会拦截"单台模式忘选设备"）
-        s.setDeviceId(all ? 0L : f.getDeviceId());
+        if (all) {
+            // 全部模式：清空 deviceIds / deviceId
+            s.setDeviceIds(null);
+            s.setDeviceId(0L);
+        } else {
+            // 指定设备模式：把 form.deviceIds（逗号分隔字符串）解析成 List<Long> 再双向同步
+            List<Long> ids = parseIds(f.getDeviceIds());
+            s.setDeviceIdList(ids);
+        }
         s.setName(f.getName());
         s.setAction(f.getAction());
         s.setTargetPath(f.getTargetPath());
         s.setCron(f.getCron());
-        // ⚠ 关键：checkbox 不勾选时 form 不提交该字段，Spring 会把 Boolean 字段绑为 null
-        // 之前 `null → TRUE` 的兜底是 bug：用户取消启用也会被强制启用
-        // 正确兜底是 null → FALSE（用户的"不勾选"明确意图 = 禁用）
         s.setEnabled(f.getEnabled() != null ? f.getEnabled() : Boolean.FALSE);
+    }
+
+    /** 把 "1,2,3" 解析成 [1, 2, 3]，空串/null 返回空列表。非法字符会跳过。 */
+    private static List<Long> parseIds(String deviceIdsStr) {
+        if (deviceIdsStr == null || deviceIdsStr.isBlank()) return List.of();
+        return Arrays.stream(deviceIdsStr.split(","))
+                .map(String::trim)
+                .filter(t -> !t.isEmpty())
+                .map(Long::parseLong)
+                .collect(Collectors.toList());
     }
 
     private Map<Long, String> deviceMap() {
@@ -171,8 +207,12 @@ public class ScheduleController {
      */
     @Data
     public static class ScheduleForm {
-        /** 单台模式必填；全部模式忽略（executor 走 controlAll） */
-        private Long deviceId;
+        /**
+         * 设备 ID 列表，逗号分隔字符串（如 "3,5,8"）。
+         * 由前端多选控件提交；后端 parseIds() 解析成 List<Long>。
+         */
+        @Size(max = 2000)
+        private String deviceIds;
 
         @NotBlank
         @Size(max = 100)
@@ -193,15 +233,16 @@ public class ScheduleController {
 
         private Boolean enabled = Boolean.TRUE;
 
-        /** true=对所有设备生效, false=对单台设备生效（默认 false） */
+        /** true=对所有启用设备生效, false=对指定多台设备生效（默认 false） */
         private Boolean targetAll = Boolean.FALSE;
 
         /**
-         * 跨字段校验：单台模式必须选设备。
+         * 跨字段校验：指定设备模式下至少要选一台设备。
          */
-        @AssertTrue(message = "单台模式下必须选择设备")
-        public boolean isDeviceIdValidForScope() {
-            return Boolean.TRUE.equals(targetAll) || deviceId != null;
+        @AssertTrue(message = "指定设备模式下必须至少选择一台设备")
+        public boolean isDeviceIdsValidForScope() {
+            if (Boolean.TRUE.equals(targetAll)) return true;
+            return deviceIds != null && !deviceIds.isBlank();
         }
 
         /**

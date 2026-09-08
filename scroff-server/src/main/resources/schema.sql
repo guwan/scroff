@@ -36,15 +36,16 @@ CREATE TABLE `device` (
 -- ------------------------------------------------------------
 -- schedule：定时任务（关屏 / 开屏）
 -- ------------------------------------------------------------
+DROP TABLE IF EXISTS `schedule_device`;
 DROP TABLE IF EXISTS `schedule`;
 CREATE TABLE `schedule` (
     `id`               BIGINT       NOT NULL AUTO_INCREMENT,
-    `device_id`        BIGINT       NOT NULL DEFAULT 0 COMMENT '单台模式=实际设备ID；所有设备模式=0（哨兵）',
+    `device_id`        BIGINT       NOT NULL DEFAULT 0 COMMENT '向后兼容字段：旧版单台模式主设备ID；多设备模式下同步为 schedule_device 第一个元素',
     `name`             VARCHAR(100) NOT NULL COMMENT '业务名（"晚间关屏"）',
     `action`           VARCHAR(20)  NOT NULL COMMENT 'OFF / ON / OPEN_FILE / OPEN_APP',
     `cron`             VARCHAR(50)  NOT NULL COMMENT 'Spring 6 字段 cron：秒 分 时 日 月 周',
     `enabled`          TINYINT(1)   NOT NULL DEFAULT 1,
-    `target_all`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '0=单台（按 device_id）；1=所有设备（device_id 忽略）',
+    `target_all`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '0=指定设备（按 schedule_device 关联表）；1=所有启用设备',
     `target_path`      VARCHAR(500)          DEFAULT NULL COMMENT 'OPEN_FILE/OPEN_APP 的目标路径或包名',
     `last_run_at`      TIMESTAMP    NULL DEFAULT NULL,
     `last_run_status`  VARCHAR(20)           DEFAULT NULL COMMENT 'SUCCESS / FAILED',
@@ -55,10 +56,18 @@ CREATE TABLE `schedule` (
     KEY `idx_schedule_device` (`device_id`),
     KEY `idx_schedule_enabled` (`enabled`),
     KEY `idx_schedule_target_all` (`target_all`)
-    -- 注意：故意不加 FK 到 device(id)：
-    --   1. target_all=1 时 device_id=0，device 表无 id=0 记录，FK 会让所有设备模式 schedule 保存失败
-    --   2. 删除设备时由应用层显式级联删 schedule（DeviceController.delete）
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时开关屏任务';
+
+-- schedule_device：多设备关联表（ElementCollection）
+-- 一条 schedule 可以关联任意数量的设备，没有 10 个的限制
+CREATE TABLE `schedule_device` (
+    `schedule_id`  BIGINT NOT NULL,
+    `device_id`    BIGINT NOT NULL,
+    `device_order` INT    NOT NULL DEFAULT 0 COMMENT '保持设备选择顺序',
+    PRIMARY KEY (`schedule_id`, `device_id`),
+    KEY `idx_sd_device` (`device_id`),
+    CONSTRAINT `fk_sd_schedule` FOREIGN KEY (`schedule_id`) REFERENCES `schedule` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务-设备关联表（多对多）';
 
 -- ------------------------------------------------------------
 -- screen_log：执行历史（仅保留最近 N 天可在应用层裁剪）

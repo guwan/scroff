@@ -204,23 +204,7 @@ public class ScreenPowerService {
 
         String msg;
         switch (s.getAction()) {
-            case ON, OFF -> {
-                boolean powerOn = (s.getAction() == Schedule.Action.ON);
-                if (s.isForAllDevices()) {
-                    // 优先级：单台 > 所有。
-                    List<Long> overriddenIds = scheduleRepo.findOverridingDeviceIds(s.getCron());
-                    if (!overriddenIds.isEmpty()) {
-                        log.info("schedule {}（所有设备）检测到 {} 台设备被单台定时器覆盖，跳过本批次: {}",
-                                s.getId(), overriddenIds.size(), overriddenIds);
-                    }
-                    BatchControlResult r = controlAllExcept(powerOn, overriddenIds, ScreenLog.TriggerType.SCHEDULE,
-                            s.getId(), s.getName());
-                    msg = r.summary();
-                } else {
-                    msg = self.control(s.getDeviceId(), powerOn, ScreenLog.TriggerType.SCHEDULE,
-                            s.getId(), s.getName());
-                }
-            }
+            case ON, OFF -> msg = runPowerAction(s);
             case OPEN_FILE -> msg = runOpenAction(s);
             case OPEN_APP  -> msg = runOpenAction(s);
             default -> msg = "未知动作类型: " + s.getAction();
@@ -234,55 +218,142 @@ public class ScreenPowerService {
         scheduleRepo.updateLastRun(s.getId(), LocalDateTime.now(), status, msg);
     }
 
+    /** ON/OFF 动作执行分支：支持"所有设备"和"指定多台设备"两种模式。 */
+    private String runPowerAction(Schedule s) {
+        boolean powerOn = (s.getAction() == Schedule.Action.ON);
+        if (s.isForAllDevices()) {
+            // 所有设备模式
+            // 新数据（schedule_device 关联表）+ 老数据兜底（device_id 主列还没迁移的）
+            List<Long> overriddenIds = new ArrayList<>(scheduleRepo.findOverridingDeviceIds(s.getCron()));
+            overriddenIds.addAll(scheduleRepo.findOverridingDeviceIdsLegacy(s.getCron()));
+            // 去重
+            overriddenIds = overriddenIds.stream().distinct().toList();
+            if (!overriddenIds.isEmpty()) {
+                log.info("schedule {}（所有设备）检测到 {} 台设备被同 cron 的定时器覆盖，跳过本批次",
+                        s.getId(), overriddenIds.size());
+            }
+            BatchControlResult r = controlAllExcept(powerOn, overriddenIds, ScreenLog.TriggerType.SCHEDULE,
+                    s.getId(), s.getName());
+            return r.summary();
+        } else {
+            // 指定设备模式：遍历 getDeviceIdList()（兼容老单台数据）
+            List<Long> ids = s.getDeviceIdList();
+            if (ids.isEmpty()) return "未指定任何设备";
+            BatchControlResult r = controlByIds(ids, powerOn, ScreenLog.TriggerType.SCHEDULE,
+                    s.getId(), s.getName());
+            return r.summary();
+        }
+    }
+
+    /**
+     * 批量 ON/OFF：按 deviceId 列表执行（不额外查 enabled）。
+     * 复用 controlAllExcept 的并发 + 日志逻辑。
+     */
+    public BatchControlResult controlByIds(List<Long> ids, boolean powerOn, ScreenLog.TriggerType trigger,
+                                            Long scheduleId, String scheduleName) {
+        if (ids == null || ids.isEmpty()) {
+            return new BatchControlResult(0, 0, List.of(), "没有指定设备");
+        }
+
+        // 查出设备并过滤掉不存在/禁用的
+        List<Device> devices = deviceRepo.findAllById(ids).stream()
+                .filter(d -> d.getEnabled())
+                .toList();
+
+        if (devices.isEmpty()) {
+            return new BatchControlResult(0, 0, List.of(), "没有启用的设备可执行");
+        }
+
+        String action = powerOn ? "开屏" : "关屏";
+        List<CompletableFuture<DeviceResult>> futures = new ArrayList<>(devices.size());
+        for (Device d : devices) {
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                try {
+                    String m = self.control(d.getId(), powerOn, trigger, scheduleId, scheduleName);
+                    boolean ok = !(m.contains("失败") || m.contains("不在线")
+                            || m.contains("不存在") || m.contains("已禁用"));
+                    return new DeviceResult(d, ok, m);
+                } catch (Exception e) {
+                    log.error("批量{}异常: device={}", action, d.getName(), e);
+                    return new DeviceResult(d, false, "异常: " + e.getMessage());
+                }
+            }, batchPool));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(60, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("批量{}等待超时或中断", action, e);
+        }
+        int success = 0, failed = 0;
+        List<String> failureMsgs = new ArrayList<>();
+        for (CompletableFuture<DeviceResult> f : futures) {
+            if (!f.isDone()) { failed++; failureMsgs.add("超时未返回"); continue; }
+            DeviceResult r = f.join();
+            if (r.ok) success++; else { failed++; failureMsgs.add(r.device.getName() + ": " + r.message); }
+        }
+        String summary = String.format("批量%s: %d/%d 成功", action, success, devices.size());
+        if (failed > 0) {
+            List<String> shown = failureMsgs.size() > 5
+                    ? new ArrayList<>(failureMsgs.subList(0, 5)) : failureMsgs;
+            if (failureMsgs.size() > 5) shown.add("... 还有 " + (failureMsgs.size() - 5) + " 个失败");
+            summary += "，失败: " + String.join("; ", shown);
+        }
+        return new BatchControlResult(success, failed, failureMsgs, summary);
+    }
+
     /**
      * 执行 OPEN_FILE / OPEN_APP 动作。
-     * <p>targetAll=true 时遍历所有启用设备，并发执行，各自独立写日志。
+     * <p>所有设备模式：遍历所有启用设备，并发执行；
+     * 指定设备模式：遍历 getDeviceIdList()，并发执行。
      */
     private String runOpenAction(Schedule s) {
         if (s.getTargetPath() == null || s.getTargetPath().isBlank()) {
             return "动作目标为空，请先配置文件路径或应用包名";
         }
+        List<Device> devices;
         if (s.isForAllDevices()) {
-            List<Device> devices = deviceRepo.findAllByEnabledTrue();
-            if (devices.isEmpty()) return "没有启用的设备";
-
-            List<CompletableFuture<String>> futures = new ArrayList<>(devices.size());
-            for (Device d : devices) {
-                futures.add(CompletableFuture.supplyAsync(() ->
-                        doOpenOnDevice(d, s, d.getId(), d.getName()), batchPool));
-            }
-            try {
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(60, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                log.warn("批量执行OPEN动作等待超时", e);
-            }
-            int ok = 0, fail = 0;
-            List<String> fails = new ArrayList<>();
-            for (CompletableFuture<String> f : futures) {
-                if (!f.isDone()) { fail++; continue; }
-                String m = f.join();
-                if (m.contains("失败") || m.contains("不在线")) {
-                    fail++;
-                    fails.add(m);
-                } else {
-                    ok++;
-                }
-            }
-            String summary = String.format("批量%s: %d/%d 成功",
-                    s.getAction() == Schedule.Action.OPEN_FILE ? "打开文件" : "打开应用",
-                    ok, devices.size());
-            if (fail > 0) {
-                summary += "，失败: " + (fails.size() > 5
-                        ? String.join("; ", fails.subList(0, 5)) + "...(+" + (fails.size()-5) + ")"
-                        : String.join("; ", fails));
-            }
-            return summary;
+            devices = deviceRepo.findAllByEnabledTrue();
         } else {
-            return doOpenOnDevice(
-                    deviceRepo.findById(s.getDeviceId()).orElse(null),
-                    s, s.getId(), s.getName());
+            List<Long> ids = s.getDeviceIdList();
+            if (ids.isEmpty()) return "未指定任何设备";
+            devices = deviceRepo.findAllById(ids).stream()
+                    .filter(d -> d.getEnabled())
+                    .toList();
         }
+        if (devices.isEmpty()) return "没有启用的设备可执行";
+
+        List<CompletableFuture<String>> futures = new ArrayList<>(devices.size());
+        for (Device d : devices) {
+            futures.add(CompletableFuture.supplyAsync(() ->
+                    doOpenOnDevice(d, s, d.getId(), d.getName()), batchPool));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(60, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("批量执行OPEN动作等待超时", e);
+        }
+        int ok = 0, fail = 0;
+        List<String> fails = new ArrayList<>();
+        for (CompletableFuture<String> f : futures) {
+            if (!f.isDone()) { fail++; continue; }
+            String m = f.join();
+            if (m.contains("失败") || m.contains("不在线")) {
+                fail++;
+                fails.add(m);
+            } else {
+                ok++;
+            }
+        }
+        String actionName = s.getAction() == Schedule.Action.OPEN_FILE ? "打开文件" : "打开应用";
+        String summary = String.format("批量%s: %d/%d 成功", actionName, ok, devices.size());
+        if (fail > 0) {
+            summary += "，失败: " + (fails.size() > 5
+                    ? String.join("; ", fails.subList(0, 5)) + "...(+" + (fails.size()-5) + ")"
+                    : String.join("; ", fails));
+        }
+        return summary;
     }
 
     /**

@@ -6,6 +6,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 定时开关屏任务。
@@ -39,8 +41,35 @@ public class Schedule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * 主设备 ID（向后兼容字段）。
+     * <ul>
+     *   <li>targetAll=true 时为 0 占位</li>
+     *   <li>targetAll=false 且 deviceIds 为空时为 0</li>
+     *   <li>targetAll=false 且 deviceIds 非空时，此字段同步为 deviceIds 的第一个元素</li>
+     * </ul>
+     * 保留此列是为了老迁移/老查询的兼容；新逻辑一律用 deviceIds（ElementCollection）。
+     */
     @Column(name = "device_id", nullable = false)
-    private Long deviceId;
+    private Long deviceId = 0L;
+
+    /**
+     * 多设备 ID 列表（通过独立关联表 schedule_device 存储）。
+     * <p>
+     * 用 @ElementCollection + @CollectionTable 代替之前的逗号分隔列，
+     * 好处：
+     * <ul>
+     *   <li>没有最多 10 个 ID 的限制（之前 CROSS JOIN + SUBSTRING_INDEX 受限于展开次数）</li>
+     *   <li>findOverridingDeviceIds 可以写成简单 JOIN，不再需要原生 SQL</li>
+     *   <li>类型安全：JPA 自动把 List&lt;Long&gt; 与关联表双向同步</li>
+     * </ul>
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "schedule_device",
+                     joinColumns = @JoinColumn(name = "schedule_id"))
+    @Column(name = "device_id")
+    @OrderColumn(name = "device_order")
+    private List<Long> deviceIds = new ArrayList<>();
 
     @Column(nullable = false, length = 100)
     private String name;
@@ -67,12 +96,8 @@ public class Schedule {
 
     /**
      * 是否对所有启用设备生效。
-     * <p>true → deviceId 字段被忽略（实际存 0 占位），executor 会用 controlAll() 并发处理所有设备。
-     * false → 只对单台设备生效，走原 control(deviceId) 流程。
-     *
-     * <p>为什么加这字段而不是把 deviceId 改 nullable：
-     * 1. ddl-auto: update 不会把已有 NOT NULL 列改成 NULL（保守策略）
-     * 2. 0 作为哨兵值，DB schema 一行不动，老数据天然兼容（默认 false = 单台）
+     * <p>true → 执行时遍历所有 enabled 的设备，deviceIds / deviceId 被忽略
+     * false → 执行时按 deviceIds 多台设备（或老的 deviceId 单台）执行
      */
     @Column(name = "target_all", nullable = false)
     private Boolean targetAll = false;
@@ -94,18 +119,38 @@ public class Schedule {
     private LocalDateTime updatedAt;
 
     /**
-     * 新建时由 JPA 回调设置 created_at / updated_at。
-     * 不依赖 DB DEFAULT CURRENT_TIMESTAMP，避免 ddl-auto: update 时旧表缺 DEFAULT 报错。
+     * 获取"有效设备 ID 列表"。
+     * targetAll=true 时返回空列表（语义由调用方决定：遍历所有启用设备）；
+     * 否则返回 deviceIds 集合（按插入顺序）。
      */
+    @Transient
+    public List<Long> getDeviceIdList() {
+        if (Boolean.TRUE.equals(targetAll)) return List.of();
+        if (deviceIds != null && !deviceIds.isEmpty()) return deviceIds;
+        // 回退到老的单 deviceId（兼容 schedule_device 还没迁移完成的老数据）
+        if (deviceId != null && deviceId > 0) {
+            return List.of(deviceId);
+        }
+        return List.of();
+    }
+
+    /**
+     * 把 List<Long> 设置为 deviceIds，同时把 deviceId 同步为第一个元素或 0。
+     */
+    public void setDeviceIdList(List<Long> ids) {
+        if (ids == null) ids = new ArrayList<>();
+        this.deviceIds = new ArrayList<>(ids); // ElementCollection 需要可变列表
+        this.deviceId = ids.isEmpty() ? 0L : ids.get(0);
+    }
+
     @PrePersist
     void onCreate() {
         LocalDateTime now = LocalDateTime.now();
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
-        // 防御：targetAll 字段在 INSERT 之前必须非 null
-        // （虽然 entity 默认值是 false，DDL 也 NOT NULL，但 ddl-auto: update 加列时
-        //   老数据可能为 NULL，@PostLoad 会兜底；此处兜底 INSERT 路径）
         if (targetAll == null) targetAll = false;
+        if (enabled == null) enabled = true;
+        if (deviceId == null) deviceId = 0L;
     }
 
     @PreUpdate
@@ -114,18 +159,16 @@ public class Schedule {
         if (targetAll == null) targetAll = false;
     }
 
-    /**
-     * 加载时兜底：ddl-auto: update 给已有 schedule 表加 target_all 列时，
-     * 老行这一列可能是 NULL。这里强制归一为 false（单台模式，老行为），
-     * 防止 isForAllDevices() / 列表 / 编辑表单因 null 出现意外分支。
-     */
     @PostLoad
     void onLoad() {
         if (targetAll == null) targetAll = false;
+        if (deviceId == null) deviceId = 0L;
+        if (enabled == null) enabled = true;
+        if (deviceIds == null) deviceIds = new ArrayList<>();
     }
 
     /**
-     * 是否"对所有设备"生效。给 executor 和 UI 共用，避免到处判 null / equals。
+     * 是否"对所有设备"生效。
      */
     public boolean isForAllDevices() {
         return Boolean.TRUE.equals(targetAll);

@@ -32,18 +32,12 @@
             <td th:text="${s.id}">1</td>
             <td th:text="${s.name}">--</td>
             <td>
-                <!--
-                    必须用 isForAllDevices()，不能直接 s.targetAll：
-                    1. 兼容 DB 老数据 target_all=NULL 场景（@PostLoad 会归一为 false）
-                    2. entity method 比直接属性判断更安全
+                <!-- 由后端 deviceNamesForSchedule 预先算好展示文本：
+                     - 所有设备 → "📺 所有设备"
+                     - 指定设备 → "设备1 (地址), 设备2 (地址)" 或 "(已删除)"
                 -->
-                <span th:if="${s.isForAllDevices()}" class="tag tag-info">📺 所有设备</span>
-                <span th:unless="${s.isForAllDevices()}">
-                    <span th:if="${deviceMap != null and deviceMap.containsKey(s.deviceId)}"
-                          th:text="${deviceMap[s.deviceId]}">--</span>
-                    <span th:unless="${deviceMap != null and deviceMap.containsKey(s.deviceId)}"
-                          class="tag tag-warn">(已删除)</span>
-                </span>
+                <span th:text="${deviceNamesForSchedule[s.id]}"
+                      class="device-cell">--</span>
             </td>
             <td>
                 <!-- ON/OFF 用原有 tag-on / tag-off 风格 -->
