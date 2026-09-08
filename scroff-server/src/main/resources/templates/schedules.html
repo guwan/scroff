@@ -63,6 +63,11 @@
             </td>
             <td class="actions">
                 <a class="btn btn-sm" th:href="@{'/schedules/' + ${s.id} + '/edit'}">编辑</a>
+                <form method="post" th:action="@{'/schedules/' + ${s.id} + '/run'}"
+                      style="display:inline"
+                      onsubmit="return confirm('立即运行一次？（不改变启用状态）')">
+                    <button class="btn btn-sm" type="submit" title="立即手动运行一次此定时任务">▶ 运行</button>
+                </form>
                 <form method="post" th:action="@{'/schedules/' + ${s.id} + '/toggle'}" style="display:inline">
                     <button class="btn btn-sm" type="submit"
                             th:text="${s.enabled} ? '禁用' : '启用'">禁用</button>

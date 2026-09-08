@@ -4,6 +4,7 @@ import com.scroff.server.entity.Schedule;
 import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.repository.ScheduleRepository;
 import com.scroff.server.scheduler.ScheduleExecutor;
+import com.scroff.server.service.ScreenPowerService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
@@ -12,6 +13,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Controller;
@@ -37,11 +39,13 @@ import java.util.stream.Collectors;
 @Controller
 @RequestMapping("/schedules")
 @RequiredArgsConstructor
+@Slf4j
 public class ScheduleController {
 
     private final ScheduleRepository scheduleRepo;
     private final DeviceRepository deviceRepo;
     private final ScheduleExecutor executor;
+    private final ScreenPowerService screenPowerService;
 
     @GetMapping
     public String list(@RequestParam(defaultValue = "0") int page,
@@ -164,6 +168,49 @@ public class ScheduleController {
         if (s.getEnabled()) executor.register(s);
         else executor.unregister(s.getId());
         ra.addFlashAttribute("msg", "已" + (s.getEnabled() ? "启用" : "禁用") + ": " + s.getName());
+        return "redirect:/schedules";
+    }
+
+    /**
+     * 立即手动运行一次定时任务（用于测试配置）。
+     * 不管 enabled 状态都强制执行一次（执行时 runSchedule 内部也会再判 enabled，
+     * 所以这里先临时把 enabled 设 true，跑完恢复原值）。
+     */
+    @PostMapping("/{id}/run")
+    public String runNow(@PathVariable Long id, RedirectAttributes ra) {
+        Optional<Schedule> opt = scheduleRepo.findById(id);
+        if (opt.isEmpty()) {
+            ra.addFlashAttribute("err", "定时任务不存在");
+            return "redirect:/schedules";
+        }
+        Schedule s = opt.get();
+        boolean wasEnabled = Boolean.TRUE.equals(s.getEnabled());
+        try {
+            if (!wasEnabled) {
+                // 临时启用以便 runSchedule 能执行，跑完恢复
+                s.setEnabled(true);
+                scheduleRepo.saveAndFlush(s);
+            }
+            screenPowerService.runSchedule(id);
+            // 重新读取一次拿到 runSchedule 回写后的 lastRunMessage
+            Schedule after = scheduleRepo.findById(id).orElse(s);
+            String summary = after.getLastRunMessage() != null ? after.getLastRunMessage() : "已触发";
+            boolean success = after.getLastRunStatus() == Schedule.LastRunStatus.SUCCESS;
+            if (success) {
+                ra.addFlashAttribute("msg", "手动运行成功: " + s.getName() + " — " + summary);
+            } else {
+                ra.addFlashAttribute("err", "手动运行结果为失败: " + s.getName() + " — " + summary);
+            }
+        } catch (Exception e) {
+            log.error("手动运行 schedule 异常", e);
+            ra.addFlashAttribute("err", "手动运行异常: " + s.getName() + " — " + e.getMessage());
+        } finally {
+            if (!wasEnabled) {
+                Schedule fresh = scheduleRepo.findById(id).orElse(s);
+                fresh.setEnabled(false);
+                scheduleRepo.save(fresh);
+            }
+        }
         return "redirect:/schedules";
     }
 
