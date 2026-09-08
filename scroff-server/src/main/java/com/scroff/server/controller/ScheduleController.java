@@ -86,6 +86,7 @@ public class ScheduleController {
         f.setTargetAll(s.getTargetAll());
         f.setName(s.getName());
         f.setAction(s.getAction());
+        f.setTargetPath(s.getTargetPath());
         f.setCron(s.getCron());
         f.setEnabled(s.getEnabled());
         model.addAttribute("form", f);
@@ -151,6 +152,7 @@ public class ScheduleController {
         s.setDeviceId(all ? 0L : f.getDeviceId());
         s.setName(f.getName());
         s.setAction(f.getAction());
+        s.setTargetPath(f.getTargetPath());
         s.setCron(f.getCron());
         // ⚠ 关键：checkbox 不勾选时 form 不提交该字段，Spring 会把 Boolean 字段绑为 null
         // 之前 `null → TRUE` 的兜底是 bug：用户取消启用也会被强制启用
@@ -179,6 +181,10 @@ public class ScheduleController {
         @NotNull
         private Schedule.Action action;
 
+        /** OPEN_FILE 时存 Android 文件路径，OPEN_APP 时存包名或 component；ON/OFF 时忽略 */
+        @Size(max = 500)
+        private String targetPath;
+
         /** 宽松校验：6 段空格分隔的 cron */
         @NotBlank
         @Pattern(regexp = "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$",
@@ -192,11 +198,22 @@ public class ScheduleController {
 
         /**
          * 跨字段校验：单台模式必须选设备。
-         * 用 @AssertTrue 是 Bean Validation 标准的跨字段写法。
          */
         @AssertTrue(message = "单台模式下必须选择设备")
         public boolean isDeviceIdValidForScope() {
             return Boolean.TRUE.equals(targetAll) || deviceId != null;
+        }
+
+        /**
+         * 跨字段校验：OPEN_FILE / OPEN_APP 时 targetPath 不能空。
+         */
+        @AssertTrue(message = "打开文件/打开应用时必须指定目标路径")
+        public boolean isTargetPathValidForAction() {
+            if (action == null) return true;
+            return switch (action) {
+                case OPEN_FILE, OPEN_APP -> targetPath != null && !targetPath.isBlank();
+                default -> true;
+            };
         }
     }
 }

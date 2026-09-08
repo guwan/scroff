@@ -46,8 +46,16 @@
                 </span>
             </td>
             <td>
-                <span th:classappend="${s.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"
-                      th:text="${s.action}">OFF</span>
+                <!-- ON/OFF 用原有 tag-on / tag-off 风格 -->
+                <span th:if="${s.action.name()=='ON'}" class="tag tag-on">开屏</span>
+                <span th:if="${s.action.name()=='OFF'}" class="tag tag-off">关屏</span>
+                <!-- OPEN_FILE / OPEN_APP 用不同颜色 tag + 显示目标路径 -->
+                <span th:if="${s.action.name()=='OPEN_FILE'}" class="tag" style="background:#fef3c7;color:#92400e;">打开文件</span>
+                <span th:if="${s.action.name()=='OPEN_APP'}" class="tag" style="background:#ede9fe;color:#5b21b6;">打开应用</span>
+                <div th:if="${s.targetPath != null and s.targetPath.length() > 0}"
+                     class="muted" style="font-size:11px;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                     th:title="${s.targetPath}"
+                     th:text="${s.targetPath}">--</div>
             </td>
             <td><code th:text="${s.cron}">--</code></td>
             <td>

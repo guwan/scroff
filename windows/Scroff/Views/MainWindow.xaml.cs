@@ -9,6 +9,9 @@ using System.Windows.Media.Animation;
 using Scroff.Services;
 using Scroff.ViewModels;
 
+// 同时引入 WinForms 时消除 Color 歧义
+using Color = System.Windows.Media.Color;
+
 namespace Scroff.Views;
 
 public partial class MainWindow : Window
@@ -16,18 +19,61 @@ public partial class MainWindow : Window
     private static readonly Color TrackOn = Color.FromRgb(0x4F, 0x7C, 0xFF);
     private static readonly Color TrackOff = Color.FromRgb(0xC9, 0xD0, 0xDC);
 
+    /// <summary>
+    /// 托盘"退出"会先把此标志置 true 后再 Shutdown，让关闭拦截放行真正退出
+    /// </summary>
+    public bool AllowClose { get; set; }
+
+    /// <summary>
+    /// 首次启动时是否已经处理过 StateChanged（避免 Loaded → 第一次状态变化误触发）
+    /// </summary>
+    private bool _initialStateProcessed;
+
     public MainWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
+        StateChanged += OnStateChanged;
+        Closing += OnClosing;
         SchedulesList.Loaded += OnSchedulesListLoaded;
     }
 
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
-        SyncAutoStartVisual();
-        RefreshAllEnabledSwitches();
+        try { SyncAutoStartVisual(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("[Scroff] SyncAutoStartVisual: " + ex); }
+        try { RefreshAllEnabledSwitches(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("[Scroff] RefreshAllEnabledSwitches: " + ex); }
+        _initialStateProcessed = true;
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e)
+    {
+        // 用户点击标题栏最小化按钮 → 隐藏到托盘
+        if (!_initialStateProcessed) return;
+        if (WindowState == WindowState.Minimized)
+        {
+            HideToTray();
+        }
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        // 托盘"退出"或程序真正关闭时才会放行
+        if (AllowClose) return;
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    /// <summary>
+    /// 把主窗隐藏到托盘（不退出进程）
+    /// </summary>
+    private void HideToTray()
+    {
+        // 把窗体还原，避免下次显示时还卡在 Minimize 状态
+        WindowState = WindowState.Normal;
+        Hide();
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -87,20 +133,32 @@ public partial class MainWindow : Window
         vm.ToggleEnabledCommand.Execute(item);
     }
 
+    /// <summary>
+    /// 无条件把 track.Background 替换成可修改的新 SolidColorBrush，返回这个新 brush。
+    /// 防御性：哪怕传入的 brush 已经被冻结，也保证调用方拿到的是 unfrozen 实例。
+    /// </summary>
+    private static SolidColorBrush EnsureMutableBrush(Border track, Color fallback)
+    {
+        var currentBrush = track.Background as SolidColorBrush;
+        if (currentBrush != null && !currentBrush.IsFrozen)
+        {
+            return currentBrush;
+        }
+        var color = currentBrush != null ? currentBrush.Color : fallback;
+        var fresh = new SolidColorBrush(color);
+        track.Background = fresh;
+        return fresh;
+    }
+
     private static void AnimateSwitch(Border track, Border thumb, bool isOn, int trackWidth, int thumbSize)
     {
         // 关键修复：XAML 里 #C9D0DC 这种字面颜色创建的 brush 是 frozen（共享只读），
         // 直接 BeginAnimation 会抛 "Cannot animate... sealed or frozen"。
-        // 必须在动画前替换为可修改的新 SolidColorBrush。
-        var currentBrush = track.Background as SolidColorBrush;
-        if (currentBrush == null || currentBrush.IsFrozen)
-        {
-            var color = currentBrush != null ? currentBrush.Color : TrackOff;
-            track.Background = new SolidColorBrush(color);
-        }
+        // 用 EnsureMutableBrush 强制替换为可修改的新 SolidColorBrush。
+        var brush = EnsureMutableBrush(track, TrackOff);
 
-        // 取消正在进行的旧动画
-        track.Background.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        // 取消正在进行的旧动画（此时 brush 一定是 unfrozen）
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
         thumb.BeginAnimation(MarginProperty, null);
 
         var duration = TimeSpan.FromMilliseconds(180);
@@ -111,7 +169,7 @@ public partial class MainWindow : Window
             To = isOn ? TrackOn : TrackOff,
             Duration = new Duration(duration)
         };
-        track.Background.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
 
         // 位移动画
         var leftMargin = isOn ? trackWidth - thumbSize - 2 : 2;
@@ -211,10 +269,16 @@ public partial class MainWindow : Window
         }
         if (track == null || thumb == null) return;
 
-        // 取消正在进行的动画，并使用非 frozen brush
-        track.Background.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        // 关键：先确保 brush 是可修改的（XAML 字面颜色 brush 是 frozen），
+        // 再 BeginAnimation 和替换，否则 frozen brush 上调 BeginAnimation 会抛异常。
+        var brush = EnsureMutableBrush(track, TrackOff);
+
+        // 取消正在进行的动画
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
         thumb.BeginAnimation(MarginProperty, null);
-        track.Background = new SolidColorBrush(isOn ? TrackOn : TrackOff);
+
+        // 直接同步颜色，不走动画
+        brush.Color = isOn ? TrackOn : TrackOff;
 
         int leftMargin = isOn ? 38 - 16 - 2 : 2;
         thumb.Margin = new Thickness(leftMargin, 0, 0, 0);

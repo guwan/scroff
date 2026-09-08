@@ -18,6 +18,11 @@
     <LangVersion>7.3</LangVersion>
     <PlatformTarget>x86</PlatformTarget>
     <ApplicationIcon>Scroff.ico</ApplicationIcon>
+    <!-- 软件版本号：UI 通过 AssemblyInformationalVersionAttribute 读取 InformationalVersion -->
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.1-win7</InformationalVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <PlatformTarget>x86</PlatformTarget>
@@ -49,6 +54,9 @@
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
+    <!-- 启用 WinForms（NotifyIcon 用于系统托盘）-->
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup>
@@ -79,6 +87,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Converters\Converters.cs" />
+    <Compile Include="Services\HistoryEntry.cs" />
+    <Compile Include="Services\NetworkMonitorService.cs" />
+    <Compile Include="Services\TrayService.cs" />
     <Compile Include="Views\TimePickerDialog.xaml.cs">
       <DependentUpon>TimePickerDialog.xaml</DependentUpon>
     </Compile>

@@ -4,6 +4,7 @@ namespace Scroff.Services;
 
 /// <summary>
 /// 屏幕控制服务 - 通过 Windows API 控制屏幕开关
+/// 返回 ExecutionResult 以便上层判断"消息是否成功广播"
 /// </summary>
 public class ScreenControlService
 {
@@ -33,9 +34,29 @@ public class ScreenControlService
     /// <summary>
     /// 关闭显示器
     /// </summary>
-    public void TurnScreenOff()
+    public ExecutionResult TurnScreenOff()
     {
-        SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_OFF);
+        try
+        {
+            // SendMessage 在 hWnd 无效时返回 0，对 HWND_BROADCAST 顶层窗口通常返回 0
+            // 但这里仍然作为"消息是否被处理"的近似信号记录
+            int result = SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_OFF);
+            return new ExecutionResult
+            {
+                Action = ScheduleAction.ScreenOff,
+                Success = result != 0,
+                Message = result != 0 ? "已发送关闭指令" : "广播消息无窗口响应"
+            };
+        }
+        catch (System.Exception ex)
+        {
+            return new ExecutionResult
+            {
+                Action = ScheduleAction.ScreenOff,
+                Success = false,
+                Message = ex.GetType().Name + ": " + ex.Message
+            };
+        }
     }
 
     /// <summary>
@@ -46,20 +67,41 @@ public class ScreenControlService
     /// 只能更新系统内部状态，无法真正唤醒处于省电模式的硬件。
     /// 需要叠加模拟输入事件来触发显示器的 DDC/CI 唤醒信号。
     /// </remarks>
-    public void TurnScreenOn()
+    public ExecutionResult TurnScreenOn()
     {
-        // 1. 发送系统消息（更新 Windows 内部显示器状态）
-        SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_ON);
+        try
+        {
+            // 1. 发送系统消息（更新 Windows 内部显示器状态）
+            int result = SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_ON);
 
-        // 2. 模拟鼠标微移（1 像素，触发显示器唤醒）
-        // 用相对移动 (0,0) 不会真正移动鼠标但能产生事件
-        mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
-        System.Threading.Thread.Sleep(20);
-        mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
+            // 2. 模拟鼠标微移（1 像素，触发显示器唤醒）
+            // 用相对移动 (0,0) 不会真正移动鼠标但能产生事件
+            mouse_event(MOUSEEVENTF_MOVE, 1, 1, 0, 0);
+            System.Threading.Thread.Sleep(20);
+            mouse_event(MOUSEEVENTF_MOVE, -1, -1, 0, 0);
 
-        // 3. 模拟 Shift 键按下与释放（进一步确保唤醒）
-        keybd_event(VK_SHIFT, 0, 0, 0);
-        System.Threading.Thread.Sleep(20);
-        keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+            // 3. 模拟 Shift 键按下与释放（进一步确保唤醒）
+            keybd_event(VK_SHIFT, 0, 0, 0);
+            System.Threading.Thread.Sleep(20);
+            keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+
+            return new ExecutionResult
+            {
+                Action = ScheduleAction.ScreenOn,
+                Success = result != 0,
+                Message = result != 0
+                    ? "已发送开启指令并模拟输入事件"
+                    : "广播消息无窗口响应（已模拟输入事件作为兜底）"
+            };
+        }
+        catch (System.Exception ex)
+        {
+            return new ExecutionResult
+            {
+                Action = ScheduleAction.ScreenOn,
+                Success = false,
+                Message = ex.GetType().Name + ": " + ex.Message
+            };
+        }
     }
 }

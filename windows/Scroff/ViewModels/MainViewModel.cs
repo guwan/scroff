@@ -2,14 +2,44 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Scroff.Services;
 using System.Collections.ObjectModel;
+using System.Reflection;
 using System.Windows;
+
+// 同时引入 WinForms + WPF 时消除 Application 歧义
+using Application = System.Windows.Application;
 
 namespace Scroff.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
+    /// <summary>历史记录最大条数（与 StorageService 保持一致）</summary>
+    private const int MaxHistoryEntries = 500;
+
     private readonly SchedulerService _scheduler;
     private readonly StorageService _storage;
+
+    /// <summary>暴露给 App 层，让 NetworkMonitorService 复用同一个 StorageService 实例</summary>
+    public StorageService Storage => _storage;
+
+    /// <summary>软件版本号，从 InformationalVersionAttribute 读取（配置在 csproj 的 &lt;InformationalVersion&gt;）</summary>
+    public string AppVersion
+    {
+        get
+        {
+            try
+            {
+                var v = Assembly.GetExecutingAssembly()
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+                return v != null && !string.IsNullOrEmpty(v.InformationalVersion)
+                    ? v.InformationalVersion
+                    : "未知版本";
+            }
+            catch
+            {
+                return "未知版本";
+            }
+        }
+    }
 
     [ObservableProperty]
     private string _newScheduleName = "";
@@ -46,6 +76,11 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<ScheduleItem> Schedules => _scheduler.Schedules;
 
+    /// <summary>
+    /// 屏幕控制历史记录（最新在前）
+    /// </summary>
+    public ObservableCollection<HistoryEntry> History { get; } = new();
+
     public MainViewModel()
     {
         _storage = new StorageService();
@@ -57,6 +92,17 @@ public partial class MainViewModel : ObservableObject
         {
             _scheduler.AddSchedule(item);
         }
+
+        // 加载历史记录（最新在前）
+        var historyLoaded = _storage.LoadHistory();
+        // 反向遍历使最新的排在最前
+        for (int i = historyLoaded.Count - 1; i >= 0; i--)
+        {
+            History.Add(historyLoaded[i]);
+        }
+
+        // 订阅屏幕控制执行完毕事件，写入历史
+        _scheduler.Executed += OnScheduleExecuted;
 
         // 首次运行：注入默认任务并启用开机自启
         if (_storage.IsFirstRun)
@@ -101,6 +147,58 @@ public partial class MainViewModel : ObservableObject
             _scheduler.AddSchedule(s);
         }
         SaveSchedules();
+    }
+
+    private void OnScheduleExecuted(HistorySource source, ScheduleAction action,
+        string? scheduleName, bool success, string? message)
+    {
+        var entry = new HistoryEntry
+        {
+            Id = DateTime.Now.Ticks,
+            Timestamp = DateTime.Now,
+            Action = action,
+            Source = source,
+            ScheduleName = scheduleName,
+            Success = success,
+            Message = message
+        };
+
+        // UI 线程安全插入（Executed 事件总是从 UI Dispatcher 触发，但保险起见 Invoke）
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            History.Insert(0, entry);
+            // 超出上限时移除尾部最旧条目
+            while (History.Count > MaxHistoryEntries)
+            {
+                History.RemoveAt(History.Count - 1);
+            }
+        });
+
+        // 持久化追加（AppendHistory 内部会再次按上限截断文件）
+        _storage.AppendHistory(entry);
+    }
+
+    /// <summary>
+    /// 网络事件回调（由 NetworkMonitorService 在 App 层 Dispatcher 内调用）：
+    /// 往 UI History 集合前插一条 + 持久化（持久化由 NetworkMonitorService 内部完成）
+    /// </summary>
+    public void OnNetworkEvent(ScheduleAction action, string? message)
+    {
+        var entry = new HistoryEntry
+        {
+            Id = DateTime.Now.Ticks,
+            Timestamp = DateTime.Now,
+            Action = action,
+            Source = HistorySource.Network,
+            ScheduleName = null,
+            Success = action != ScheduleAction.NetworkReconnectFailed,
+            Message = message
+        };
+        History.Insert(0, entry);
+        while (History.Count > MaxHistoryEntries)
+        {
+            History.RemoveAt(History.Count - 1);
+        }
     }
 
     partial void OnIsScreenOffActionChanged(bool value)
@@ -204,6 +302,34 @@ public partial class MainViewModel : ObservableObject
         var newValue = !schedule.Enabled;
         _scheduler.ToggleSchedule(schedule, newValue);
         SaveSchedules();
+    }
+
+    /// <summary>
+    /// 手动立即关屏（托盘菜单用）
+    /// </summary>
+    [RelayCommand]
+    public void TurnOffNow()
+    {
+        _scheduler.Execute(ScheduleAction.ScreenOff, HistorySource.Manual, null);
+    }
+
+    /// <summary>
+    /// 手动立即开屏（托盘菜单用）
+    /// </summary>
+    [RelayCommand]
+    public void TurnOnNow()
+    {
+        _scheduler.Execute(ScheduleAction.ScreenOn, HistorySource.Manual, null);
+    }
+
+    /// <summary>
+    /// 清空历史记录
+    /// </summary>
+    [RelayCommand]
+    public void ClearHistory()
+    {
+        History.Clear();
+        _storage.ClearHistory();
     }
 
     private void SaveSchedules()

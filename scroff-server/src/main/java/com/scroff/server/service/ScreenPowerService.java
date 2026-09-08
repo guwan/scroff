@@ -109,13 +109,37 @@ public class ScreenPowerService {
 
     /**
      * 控制单台设备屏幕开关。返回执行结果消息。
+     * <p>兼容旧调用方（MANUAL / API）—— schedule 字段为 null。
      */
     @Transactional
     public String control(Long deviceId, boolean powerOn, ScreenLog.TriggerType trigger) {
+        return doControl(deviceId, powerOn, trigger, null, null);
+    }
+
+    /**
+     * 由 schedule 触发的控制。trigger 固定为 SCHEDULE，scheduleId/scheduleName 写入日志便于追溯。
+     */
+    @Transactional
+    public String control(Long deviceId, boolean powerOn, ScreenLog.TriggerType trigger,
+                          Long scheduleId, String scheduleName) {
+        return doControl(deviceId, powerOn, trigger, scheduleId, scheduleName);
+    }
+
+    /**
+     * 实际执行：参数校验、重连、构造命令、跑 adb、写日志。
+     * <p>事务边界在 {@link #control} 上；此处不再开新事务（私有方法 self-call 也会被忽略）。
+     * <p>耗时测量：从入参校验通过开始，到 adb 返回结束（含设备不在线时的 connect 重试）。
+     */
+    private String doControl(Long deviceId, boolean powerOn, ScreenLog.TriggerType trigger,
+                             Long scheduleId, String scheduleName) {
+        // 整个流程的总耗时（含 DB 查询 / 重连 / adb 命令）
+        long startMs = System.currentTimeMillis();
+
         Optional<Device> opt = deviceRepo.findById(deviceId);
         if (opt.isEmpty()) {
             String msg = "设备不存在: id=" + deviceId;
             log.warn(msg);
+            // 设备不存在时不写日志（无 device 信息可写）
             return msg;
         }
         Device device = opt.get();
@@ -130,7 +154,9 @@ public class ScreenPowerService {
             log.info("设备未连接，尝试自动重连: {}", device.getName());
             boolean ok = deviceManager.ensureConnected(device);
             if (!ok) {
-                writeLog(device, powerOn, trigger, false, "设备不在线，connect 失败");
+                int durationMs = (int) (System.currentTimeMillis() - startMs);
+                writeLog(device, powerOn, trigger, false, "设备不在线，connect 失败",
+                        scheduleId, scheduleName, durationMs);
                 return "设备不在线: " + device.getName();
             }
         }
@@ -147,15 +173,24 @@ public class ScreenPowerService {
                 ? action + "成功"
                 : (action + "失败: " + r.getErrorMessage());
 
-        log.info("{} {} ({}) -> {}", action, device.getName(), device.getAddress(),
-                success ? "OK" : "FAIL: " + r.getErrorMessage());
+        log.info("{} {} ({}) -> {} ({}ms)", action, device.getName(), device.getAddress(),
+                success ? "OK" : "FAIL: " + r.getErrorMessage(),
+                System.currentTimeMillis() - startMs);
 
-        writeLog(device, powerOn, trigger, success, message);
+        int durationMs = (int) (System.currentTimeMillis() - startMs);
+        writeLog(device, powerOn, trigger, success, message,
+                scheduleId, scheduleName, durationMs);
         return message;
     }
 
     /**
      * 定时任务专用：执行后回写 schedule.last_run_*
+     * <p>按 action 类型分发：
+     * <ul>
+     *   <li>ON / OFF → 走原有 {@link #control} 开关屏流程</li>
+     *   <li>OPEN_FILE → 执行 am start 打开指定文件</li>
+     *   <li>OPEN_APP  → 执行 am start / monkey 打开指定应用</li>
+     * </ul>
      */
     @Transactional
     public void runSchedule(Long scheduleId) {
@@ -166,23 +201,31 @@ public class ScreenPowerService {
             log.debug("schedule {} 已禁用，跳过", s.getId());
             return;
         }
-        boolean powerOn = (s.getAction() == Schedule.Action.ON);
+
         String msg;
-        if (s.isForAllDevices()) {
-            // 优先级：单台 > 所有。
-            // 所有设备 mode 触发时，查"同 cron 的单台 schedule 对应的 device id"列表，
-            // 这些设备由单台 schedule "接管"，从本批次里排除，避免重复/冲突控制。
-            List<Long> overriddenIds = scheduleRepo.findOverridingDeviceIds(s.getCron());
-            if (!overriddenIds.isEmpty()) {
-                log.info("schedule {}（所有设备）检测到 {} 台设备被单台定时器覆盖，跳过本批次: {}",
-                        s.getId(), overriddenIds.size(), overriddenIds);
+        switch (s.getAction()) {
+            case ON, OFF -> {
+                boolean powerOn = (s.getAction() == Schedule.Action.ON);
+                if (s.isForAllDevices()) {
+                    // 优先级：单台 > 所有。
+                    List<Long> overriddenIds = scheduleRepo.findOverridingDeviceIds(s.getCron());
+                    if (!overriddenIds.isEmpty()) {
+                        log.info("schedule {}（所有设备）检测到 {} 台设备被单台定时器覆盖，跳过本批次: {}",
+                                s.getId(), overriddenIds.size(), overriddenIds);
+                    }
+                    BatchControlResult r = controlAllExcept(powerOn, overriddenIds, ScreenLog.TriggerType.SCHEDULE,
+                            s.getId(), s.getName());
+                    msg = r.summary();
+                } else {
+                    msg = self.control(s.getDeviceId(), powerOn, ScreenLog.TriggerType.SCHEDULE,
+                            s.getId(), s.getName());
+                }
             }
-            BatchControlResult r = controlAllExcept(powerOn, overriddenIds, ScreenLog.TriggerType.SCHEDULE);
-            msg = r.summary();
-        } else {
-            // 对单台设备生效（原行为）
-            msg = control(s.getDeviceId(), powerOn, ScreenLog.TriggerType.SCHEDULE);
+            case OPEN_FILE -> msg = runOpenAction(s);
+            case OPEN_APP  -> msg = runOpenAction(s);
+            default -> msg = "未知动作类型: " + s.getAction();
         }
+
         Schedule.LastRunStatus status = msg.contains("失败")
                 ? Schedule.LastRunStatus.FAILED
                 : Schedule.LastRunStatus.SUCCESS;
@@ -191,18 +234,252 @@ public class ScreenPowerService {
         scheduleRepo.updateLastRun(s.getId(), LocalDateTime.now(), status, msg);
     }
 
-    private void writeLog(Device device, boolean powerOn,
-                          ScreenLog.TriggerType trigger, boolean success, String message) {
+    /**
+     * 执行 OPEN_FILE / OPEN_APP 动作。
+     * <p>targetAll=true 时遍历所有启用设备，并发执行，各自独立写日志。
+     */
+    private String runOpenAction(Schedule s) {
+        if (s.getTargetPath() == null || s.getTargetPath().isBlank()) {
+            return "动作目标为空，请先配置文件路径或应用包名";
+        }
+        if (s.isForAllDevices()) {
+            List<Device> devices = deviceRepo.findAllByEnabledTrue();
+            if (devices.isEmpty()) return "没有启用的设备";
+
+            List<CompletableFuture<String>> futures = new ArrayList<>(devices.size());
+            for (Device d : devices) {
+                futures.add(CompletableFuture.supplyAsync(() ->
+                        doOpenOnDevice(d, s, d.getId(), d.getName()), batchPool));
+            }
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(60, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("批量执行OPEN动作等待超时", e);
+            }
+            int ok = 0, fail = 0;
+            List<String> fails = new ArrayList<>();
+            for (CompletableFuture<String> f : futures) {
+                if (!f.isDone()) { fail++; continue; }
+                String m = f.join();
+                if (m.contains("失败") || m.contains("不在线")) {
+                    fail++;
+                    fails.add(m);
+                } else {
+                    ok++;
+                }
+            }
+            String summary = String.format("批量%s: %d/%d 成功",
+                    s.getAction() == Schedule.Action.OPEN_FILE ? "打开文件" : "打开应用",
+                    ok, devices.size());
+            if (fail > 0) {
+                summary += "，失败: " + (fails.size() > 5
+                        ? String.join("; ", fails.subList(0, 5)) + "...(+" + (fails.size()-5) + ")"
+                        : String.join("; ", fails));
+            }
+            return summary;
+        } else {
+            return doOpenOnDevice(
+                    deviceRepo.findById(s.getDeviceId()).orElse(null),
+                    s, s.getId(), s.getName());
+        }
+    }
+
+    /**
+     * 在单台设备上执行 OPEN_FILE / OPEN_APP。
+     */
+    private String doOpenOnDevice(Device device, Schedule s, Long scheduleId, String scheduleName) {
+        long startMs = System.currentTimeMillis();
+        ScreenLog.Action logAction = toScreenLogAction(s.getAction());
+        if (device == null) {
+            String msg = "设备不存在";
+            return msg; // 无 device 信息，无法写日志
+        }
+        if (!device.getEnabled()) {
+            String msg = "设备已禁用: " + device.getName();
+            writeLog(device, logAction, ScreenLog.TriggerType.SCHEDULE, false, msg, scheduleId, scheduleName,
+                    (int) (System.currentTimeMillis() - startMs));
+            return msg;
+        }
+        if (!adbService.isOnline(device.getAddress())) {
+            log.info("设备未连接，尝试自动重连: {}", device.getName());
+            boolean ok = deviceManager.ensureConnected(device);
+            if (!ok) {
+                String msg = "设备不在线，connect 失败";
+                writeLog(device, logAction, ScreenLog.TriggerType.SCHEDULE, false, msg, scheduleId, scheduleName,
+                        (int) (System.currentTimeMillis() - startMs));
+                return msg;
+            }
+        }
+
+        String target = s.getTargetPath();
+        String actionLabel = s.getAction() == Schedule.Action.OPEN_FILE ? "打开文件" : "打开应用";
+        // 给 cmd 一个初始值，编译器能确认必然初始化
+        String cmd = "echo 'no-op'";
+        if (s.getAction() == Schedule.Action.OPEN_FILE) {
+            // 自动判断 MIME type
+            String mime = guessMime(target);
+            // 不指定 component，让 Android 自己选合适的应用打开（视频播放器、图片查看器等）
+            // 注意：shell 单引号里不能直接放单引号，所以路径必须安全。
+            // 如果路径含单引号则用双引号方案转义。
+            String safeTarget = shellSingleQuote(target);
+            String safeMime = shellSingleQuote(mime);
+            cmd = String.format(
+                    "am start -W -a android.intent.action.VIEW -d 'file://%s' -t '%s'",
+                    safeTarget, safeMime);
+        } else {
+            // OPEN_APP：先尝试用 cmd package resolve-activity 拿 launcher activity，
+            // 如果 target 已经是 component 格式（带 /），直接用
+            if (target.contains("/")) {
+                cmd = "am start -W -n " + escapeAdbArg(target);
+            } else {
+                // 只有包名，先 resolve launcher activity
+                AdbResult resolve = adbService.execShell(device.getAddress(),
+                        "cmd package resolve-activity --brief " + escapeAdbArg(target));
+                boolean resolved = false;
+                if (resolve.isSuccess()) {
+                    for (String line : resolve.getStdout().split("\\r?\\n")) {
+                        line = line.trim();
+                        if (line.contains("/") && line.startsWith(target)) {
+                            cmd = "am start -W -n " + escapeAdbArg(line);
+                            resolved = true;
+                            break;
+                        }
+                    }
+                }
+                if (!resolved) {
+                    // fallback 用 monkey
+                    cmd = "monkey -p " + escapeAdbArg(target) + " -c android.intent.category.LAUNCHER 1";
+                }
+            }
+        }
+
+        AdbResult r = adbService.execShell(device.getAddress(), cmd);
+        boolean success = r.isSuccess();
+        String message = success
+                ? actionLabel + "成功: " + shortTarget(target)
+                : (actionLabel + "失败: " + r.getErrorMessage() + " (target=" + shortTarget(target) + ")");
+
+        log.info("{} {} ({}) -> {} ({}ms)", actionLabel, device.getName(), device.getAddress(),
+                success ? "OK" : "FAIL: " + r.getErrorMessage(),
+                System.currentTimeMillis() - startMs);
+
+        int durationMs = (int) (System.currentTimeMillis() - startMs);
+        writeLog(device, logAction, ScreenLog.TriggerType.SCHEDULE, success, message, scheduleId, scheduleName, durationMs);
+        return message;
+    }
+
+    /**
+     * 粗略根据扩展名猜 MIME type。只有几个常见格式，覆盖不到就返回 application/octet-stream。
+     */
+    private static String guessMime(String path) {
+        if (path == null) return "application/octet-stream";
+        String lower = path.toLowerCase();
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".3gp")) return "video/3gpp";
+        if (lower.endsWith(".mkv")) return "video/x-matroska";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        if (lower.endsWith(".wmv")) return "video/x-ms-wmv";
+        if (lower.endsWith(".ts") || lower.endsWith(".m2ts")) return "video/mp2t";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".wav")) return "audio/wav";
+        if (lower.endsWith(".flac")) return "audio/flac";
+        if (lower.endsWith(".txt")) return "text/plain";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        return "application/octet-stream";
+    }
+
+    /**
+     * adb shell 参数转义：含空格时用单引号包起来。
+     */
+    private static String escapeAdbArg(String arg) {
+        if (arg == null) return "''";
+        if (!arg.contains(" ") && !arg.contains("'")) return arg;
+        return "'" + arg.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * 把值安全地放入 shell 单引号字符串。
+     * 与 {@link #escapeAdbArg} 不同：这里假设外面已经有一层 '...' 包裹，
+     * 所以只需处理内部单引号（' → '\''）。
+     * <p>
+     * 例：shellSingleQuote("/path/with'space") → /path/with'\''space
+     * 然后外面 'file://%s' 拼成 'file:///path/with'\''space'
+     */
+    private static String shellSingleQuote(String arg) {
+        if (arg == null) return "";
+        return arg.replace("'", "'\\''");
+    }
+
+    /**
+     * 用于日志里显示的简短 target，避免太长。
+     */
+    private static String shortTarget(String t) {
+        if (t == null) return "";
+        return t.length() > 80 ? t.substring(0, 77) + "..." : t;
+    }
+
+    /**
+     * 把 Schedule.Action 转换成 ScreenLog.Action（仅用于日志）。
+     */
+    private static ScreenLog.Action toScreenLogAction(Schedule.Action a) {
+        return switch (a) {
+            case ON -> ScreenLog.Action.ON;
+            case OFF -> ScreenLog.Action.OFF;
+            case OPEN_FILE -> ScreenLog.Action.OPEN_FILE;
+            case OPEN_APP -> ScreenLog.Action.OPEN_APP;
+        };
+    }
+
+    /**
+     * 简化版 writeLog：直接接受 ScreenLog.Action，供 OPEN_FILE / OPEN_APP 复用。
+     */
+    private void writeLog(Device device, ScreenLog.Action screenAction,
+                          ScreenLog.TriggerType trigger, boolean success, String message,
+                          Long scheduleId, String scheduleName, Integer durationMs) {
         ScreenLog log = new ScreenLog();
         log.setDeviceId(device.getId());
         log.setDeviceName(device.getName());
-        log.setAction(powerOn ? ScreenLog.Action.ON : ScreenLog.Action.OFF);
+        log.setDeviceAddress(device.getAddress());
+        log.setAction(screenAction);
         log.setTriggerType(trigger);
+        log.setScheduleId(scheduleId);
+        log.setScheduleName(scheduleName);
         log.setSuccess(success);
         if (message != null && message.length() > 990) {
             message = message.substring(0, 980) + "...";
         }
         log.setMessage(message);
+        log.setDurationMs(durationMs);
+        log.setExecutedAt(LocalDateTime.now());
+        logRepo.save(log);
+    }
+
+    private void writeLog(Device device, boolean powerOn,
+                          ScreenLog.TriggerType trigger, boolean success, String message,
+                          Long scheduleId, String scheduleName, Integer durationMs) {
+        ScreenLog log = new ScreenLog();
+        log.setDeviceId(device.getId());
+        log.setDeviceName(device.getName());
+        // 冗余 host:port，便于同名设备在日志中区分（device 改名/删除后仍可读）
+        log.setDeviceAddress(device.getAddress());
+        log.setAction(powerOn ? ScreenLog.Action.ON : ScreenLog.Action.OFF);
+        log.setTriggerType(trigger);
+        // SCHEDULE 触发时记录来源 schedule；MANUAL / API 留 null
+        log.setScheduleId(scheduleId);
+        log.setScheduleName(scheduleName);
+        log.setSuccess(success);
+        if (message != null && message.length() > 990) {
+            message = message.substring(0, 980) + "...";
+        }
+        log.setMessage(message);
+        log.setDurationMs(durationMs);
         log.setExecutedAt(LocalDateTime.now());
         logRepo.save(log);
     }
@@ -220,7 +497,7 @@ public class ScreenPowerService {
      * @return 给用户看的汇总消息
      */
     public BatchControlResult controlAll(boolean powerOn, ScreenLog.TriggerType trigger) {
-        return controlAllExcept(powerOn, List.of(), trigger);
+        return controlAllExcept(powerOn, List.of(), trigger, null, null);
     }
 
     /**
@@ -238,7 +515,8 @@ public class ScreenPowerService {
      * @param excludeIds 排除的 device id 列表（不修改原集合）
      * @param trigger    触发类型，写到 screen_log.trigger 字段
      */
-    public BatchControlResult controlAllExcept(boolean powerOn, List<Long> excludeIds, ScreenLog.TriggerType trigger) {
+    public BatchControlResult controlAllExcept(boolean powerOn, List<Long> excludeIds, ScreenLog.TriggerType trigger,
+                                               Long scheduleId, String scheduleName) {
         // 转 Set 让 contains 是 O(1)
         Set<Long> excludeSet = excludeIds == null ? Set.of() : new HashSet<>(excludeIds);
 
@@ -266,7 +544,7 @@ public class ScreenPowerService {
         for (Device d : devices) {
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {
-                    String msg = self.control(d.getId(), powerOn, trigger);
+                    String msg = self.control(d.getId(), powerOn, trigger, scheduleId, scheduleName);
                     boolean ok = !(msg.contains("失败") || msg.contains("不在线")
                             || msg.contains("不存在") || msg.contains("已禁用"));
                     return new DeviceResult(d, ok, msg);

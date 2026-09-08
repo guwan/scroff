@@ -10,37 +10,99 @@
 
     <div class="page-header">
         <h1>执行日志</h1>
-        <form method="get" action="/logs" class="filter">
-            <select name="deviceId" onchange="this.form.submit()">
+    </div>
+
+    <!-- 搜索条件（各条件独立）：GET 表单提交到 /logs，page 固定 0（重新搜索回第一页） -->
+    <form method="get" action="/logs" class="filter-form">
+        <input type="hidden" name="page" value="0"/>
+        <div class="filter-item">
+            <label for="fDevice">设备</label>
+            <select id="fDevice" name="deviceId">
                 <option value="">全部设备</option>
                 <option th:each="d : ${devices}"
                         th:value="${d.id}"
                         th:text="${d.name + ' (' + d.address + ')'}"
                         th:selected="${selectedDeviceId != null and selectedDeviceId == d.id}">--</option>
             </select>
-        </form>
-    </div>
+        </div>
+        <div class="filter-item">
+            <label for="fDeviceName">设备名</label>
+            <input type="text" id="fDeviceName" name="deviceName" th:value="${deviceName}" placeholder="名称，模糊匹配"/>
+        </div>
+        <div class="filter-item">
+            <label for="fFrom">时间从</label>
+            <input type="datetime-local" id="fFrom" name="startTime" th:value="${fromStr}"/>
+        </div>
+        <div class="filter-item">
+            <label for="fTo">时间到</label>
+            <input type="datetime-local" id="fTo" name="endTime" th:value="${toStr}"/>
+        </div>
+        <div class="filter-item">
+            <label for="fAction">动作</label>
+            <select id="fAction" name="action">
+                <option value="">全部</option>
+                <option value="ON" th:selected="${action == 'ON'}">ON（开屏）</option>
+                <option value="OFF" th:selected="${action == 'OFF'}">OFF（关屏）</option>
+            </select>
+        </div>
+        <div class="filter-item">
+            <label for="fIp">IP / 地址</label>
+            <input type="text" id="fIp" name="ip" th:value="${ip}" placeholder="如 192.168.1"/>
+        </div>
+        <div class="filter-item">
+            <label for="fCategory">分类</label>
+            <input type="text" id="fCategory" name="category" th:value="${category}" placeholder="按设备分类，模糊匹配"/>
+        </div>
+        <div class="filter-item">
+            <label for="fLocation">位置</label>
+            <input type="text" id="fLocation" name="location" th:value="${location}" placeholder="按设备位置，模糊匹配"/>
+        </div>
+        <div class="filter-item filter-actions">
+            <button class="btn btn-primary" type="submit">搜索</button>
+            <a class="btn btn-default" href="/logs">重置</a>
+        </div>
+    </form>
 
     <table class="table">
         <thead>
         <tr>
+            <th>ID</th>
             <th>时间</th>
             <th>设备</th>
+            <th>设备地址</th>
             <th>动作</th>
             <th>触发</th>
+            <th>定时任务</th>
+            <th>耗时</th>
             <th>结果</th>
             <th>信息</th>
         </tr>
         </thead>
         <tbody>
         <tr th:each="log : ${page.content}">
+            <td th:text="${log.id}" class="muted">--</td>
             <td th:text="${#temporals.format(log.executedAt,'yyyy-MM-dd HH:mm:ss')}">--</td>
             <td th:text="${log.deviceName}">--</td>
+            <td th:text="${log.deviceAddress}" class="muted">--</td>
             <td>
                 <span th:classappend="${log.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"
                       th:text="${log.action}">OFF</span>
             </td>
             <td th:text="${log.triggerType}">--</td>
+            <td>
+                <span th:if="${log.scheduleId != null}"
+                      class="tag tag-info"
+                      th:title="${'schedule id=' + log.scheduleId}"
+                      th:text="${log.scheduleName + ' (#' + log.scheduleId + ')'}">schedule</span>
+                <span th:if="${log.scheduleId == null}" class="muted">--</span>
+            </td>
+            <td class="muted">
+                <span th:if="${log.durationMs == null}">--</span>
+                <span th:if="${log.durationMs != null and log.durationMs >= 60000}"
+                      th:text="${#numbers.formatInteger(log.durationMs / 1000, 0) + 's'}">0s</span>
+                <span th:if="${log.durationMs != null and log.durationMs < 60000}"
+                      th:text="${log.durationMs + 'ms'}">0ms</span>
+            </td>
             <td>
                 <span th:classappend="${log.success} ? 'tag tag-ok' : 'tag tag-err'"
                       th:text="${log.success} ? '成功' : '失败'">--</span>
@@ -48,7 +110,10 @@
             <td th:text="${log.message}" class="muted">--</td>
         </tr>
         <tr th:if="${page.content.empty}">
-            <td colspan="6" class="empty">暂无日志</td>
+            <td colspan="10" class="empty">
+                <th:block th:if="${hasFilter}">没有符合条件的日志</th:block>
+                <th:block th:if="${not hasFilter}">暂无日志</th:block>
+            </td>
         </tr>
         </tbody>
     </table>
@@ -56,10 +121,10 @@
     <div class="pager" th:if="${page.totalPages > 1}">
         <span>共 <b th:text="${page.totalElements}">0</b> 条</span>
         <a th:if="${page.hasPrevious()}"
-           th:href="@{/logs(page=${page.number-1}, deviceId=${selectedDeviceId})}">«</a>
+           th:href="@{/logs(page=${page.number-1}, deviceId=${selectedDeviceId}, deviceName=${deviceName}, action=${action}, ip=${ip}, category=${category}, location=${location}, startTime=${fromStr}, endTime=${toStr})}">«</a>
         <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
         <a th:if="${page.hasNext()}"
-           th:href="@{/logs(page=${page.number+1}, deviceId=${selectedDeviceId})}">»</a>
+           th:href="@{/logs(page=${page.number+1}, deviceId=${selectedDeviceId}, deviceName=${deviceName}, action=${action}, ip=${ip}, category=${category}, location=${location}, startTime=${fromStr}, endTime=${toStr})}">»</a>
     </div>
 </main>
 

@@ -8,6 +8,9 @@ using System.Windows.Media.Animation;
 using Scroff.Win7.Services;
 using Scroff.Win7.ViewModels;
 
+// 同时引入 WinForms 时消除 Color 歧义
+using Color = System.Windows.Media.Color;
+
 namespace Scroff.Win7
 {
     public partial class MainWindow : Window
@@ -17,11 +20,21 @@ namespace Scroff.Win7
 
         private MainViewModel _vm;
 
+        /// <summary>
+        /// 托盘"退出"会先把此标志置 true 后再 Shutdown，让关闭拦截放行真正退出
+        /// </summary>
+        public bool AllowClose { get; set; }
+
+        /// <summary>首次启动 StateChanged 已处理</summary>
+        private bool _initialStateProcessed;
+
         public MainWindow()
         {
             InitializeComponent();
             DataContextChanged += OnDataContextChanged;
             Loaded += OnLoaded;
+            StateChanged += OnStateChanged;
+            Closing += OnClosing;
         }
 
         private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -39,6 +52,31 @@ namespace Scroff.Win7
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
             SyncAutoStartVisual();
+            _initialStateProcessed = true;
+        }
+
+        private void OnStateChanged(object sender, EventArgs e)
+        {
+            // 用户点击标题栏最小化按钮 → 隐藏到托盘
+            if (!_initialStateProcessed) return;
+            if (WindowState == WindowState.Minimized)
+            {
+                HideToTray();
+            }
+        }
+
+        private void OnClosing(object sender, CancelEventArgs e)
+        {
+            if (AllowClose) return;
+            e.Cancel = true;
+            HideToTray();
+        }
+
+        /// <summary>把主窗隐藏到托盘（不退出进程）</summary>
+        private void HideToTray()
+        {
+            WindowState = WindowState.Normal;
+            Hide();
         }
 
         private void OnViewModelPropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -71,24 +109,36 @@ namespace Scroff.Win7
         }
 
         /// <summary>
+        /// 无条件把 track.Background 替换成可修改的新 SolidColorBrush，返回这个新 brush。
+        /// 防御性：哪怕传入的 brush 已经被冻结，也保证调用方拿到的是 unfrozen 实例。
+        /// </summary>
+        private static SolidColorBrush EnsureMutableBrush(Border track, Color fallback)
+        {
+            var currentBrush = track.Background as SolidColorBrush;
+            if (currentBrush != null && !currentBrush.IsFrozen)
+            {
+                return currentBrush;
+            }
+            var color = currentBrush != null ? currentBrush.Color : fallback;
+            var fresh = new SolidColorBrush(color);
+            track.Background = fresh;
+            return fresh;
+        }
+
+        /// <summary>
         /// 开机自启动开关动画。XAML 字面颜色创建的 brush 是 frozen（共享只读），
         /// 不能直接动画，需先替换为可修改的新 SolidColorBrush 实例。
         /// </summary>
         private static void AnimateSwitch(Border track, Border thumb, bool isOn, int trackWidth, int thumbSize)
         {
-            var currentBrush = track.Background as SolidColorBrush;
-            if (currentBrush == null || currentBrush.IsFrozen)
-            {
-                var c = currentBrush != null ? currentBrush.Color : TrackOff;
-                track.Background = new SolidColorBrush(c);
-            }
+            var brush = EnsureMutableBrush(track, TrackOff);
 
             // 取消正在进行的旧动画
-            track.Background.BeginAnimation(SolidColorBrush.ColorProperty, null);
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
             thumb.BeginAnimation(MarginProperty, null);
 
             var duration = TimeSpan.FromMilliseconds(180);
-            var fromColor = ((SolidColorBrush)track.Background).Color;
+            var fromColor = brush.Color;
 
             var colorAnim = new ColorAnimation
             {
@@ -96,7 +146,7 @@ namespace Scroff.Win7
                 To = isOn ? TrackOn : TrackOff,
                 Duration = new Duration(duration)
             };
-            track.Background.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
 
             var leftMargin = isOn ? trackWidth - thumbSize - 2 : 2;
             var marginAnim = new ThicknessAnimation

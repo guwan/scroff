@@ -5,6 +5,9 @@ using System.Windows.Data;
 using System.Windows.Media;
 using Scroff.Services;
 
+// 同时引入 WinForms 时消除 Color 歧义
+using Color = System.Windows.Media.Color;
+
 namespace Scroff.Converters;
 
 /// <summary>
@@ -16,7 +19,15 @@ public class ScheduleActionToTextConverter : IValueConverter
     {
         if (value is ScheduleAction action)
         {
-            return action == ScheduleAction.ScreenOff ? "关闭屏幕" : "打开屏幕";
+            return action switch
+            {
+                ScheduleAction.ScreenOff => "关闭屏幕",
+                ScheduleAction.ScreenOn => "打开屏幕",
+                ScheduleAction.NetworkDisconnected => "网络断开",
+                ScheduleAction.NetworkReconnected => "网络恢复",
+                ScheduleAction.NetworkReconnectFailed => "重连失败",
+                _ => action.ToString()
+            };
         }
         return "";
     }
@@ -36,9 +47,15 @@ public class ScheduleActionToColorConverter : IValueConverter
     {
         if (value is ScheduleAction action)
         {
-            return action == ScheduleAction.ScreenOff
-                ? new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D))
-                : new SolidColorBrush(Color.FromRgb(0x30, 0xA4, 0x6E));
+            return action switch
+            {
+                ScheduleAction.ScreenOff => new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D)), // 红
+                ScheduleAction.ScreenOn => new SolidColorBrush(Color.FromRgb(0x30, 0xA4, 0x6E)),  // 绿
+                ScheduleAction.NetworkDisconnected => new SolidColorBrush(Color.FromRgb(0xE5, 0xA2, 0x3B)), // 橙
+                ScheduleAction.NetworkReconnected => new SolidColorBrush(Color.FromRgb(0x30, 0xA4, 0x6E)),  // 绿
+                ScheduleAction.NetworkReconnectFailed => new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D)), // 红
+                _ => new SolidColorBrush(Colors.Gray)
+            };
         }
         return new SolidColorBrush(Colors.Gray);
     }
@@ -106,7 +123,33 @@ public class EditModeToTitleConverter : IValueConverter
         }
         return "添加定时任务";
     }
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
 
+/// <summary>
+/// 十六进制颜色字符串（如 "#30A46E"）转 SolidColorBrush
+/// </summary>
+public class HexToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is string hex && !string.IsNullOrWhiteSpace(hex))
+        {
+            try
+            {
+                var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+                return new System.Windows.Media.SolidColorBrush(color);
+            }
+            catch
+            {
+                return System.Windows.Media.Brushes.Gray;
+            }
+        }
+        return System.Windows.Media.Brushes.Gray;
+    }
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
     {
         throw new NotImplementedException();

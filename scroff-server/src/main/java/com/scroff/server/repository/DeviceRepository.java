@@ -27,6 +27,27 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     Page<Device> findAll(Pageable pageable);
 
     /**
+     * 设备列表搜索：各条件为 null 表示不过滤。
+     * name/category/location 模糊匹配；address 模糊匹配 host:port 拼接串（即页面上的 ADB 地址）。
+     * 条件全部为 null 时等同 findAll，仍按 sortOrder、id 升序。
+     */
+    @Query("""
+            SELECT d FROM Device d
+            WHERE (:name IS NULL OR d.name LIKE %:name%)
+              AND (:category IS NULL OR d.category LIKE %:category%)
+              AND (:location IS NULL OR d.location LIKE %:location%)
+              AND (:address IS NULL OR CONCAT(d.host, ':', CAST(d.adbPort AS string)) LIKE %:address%)
+              AND (:status IS NULL OR d.status = :status)
+            ORDER BY d.sortOrder ASC, d.id ASC
+            """)
+    Page<Device> search(@Param("name") String name,
+                        @Param("category") String category,
+                        @Param("location") String location,
+                        @Param("address") String address,
+                        @Param("status") Device.Status status,
+                        Pageable pageable);
+
+    /**
      * 快速更新心跳字段，避免加载整个实体。
      * clearAutomatically=true 防止 JPA 一级缓存里残留旧值，让紧跟其后的 findById 拿到新数据。
      */

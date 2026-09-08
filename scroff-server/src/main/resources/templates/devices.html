@@ -33,19 +33,47 @@
         </div>
     </div>
 
-    <!-- 页面大小选择器：GET 表单自动提交到 /devices?size=N&page=0 -->
-    <form method="get" action="/devices" class="size-form" id="sizeForm">
+    <!-- 搜索条件（各条件独立）+ 页面大小：GET 表单提交到 /devices，page 固定 0（重新搜索回第一页） -->
+    <form method="get" action="/devices" class="filter-form">
         <input type="hidden" name="page" value="0"/>
-        <label>
-            每页
-            <select name="size" id="sizeSelect" onchange="onSizeChange(this)">
+        <div class="filter-item">
+            <label for="fName">名称</label>
+            <input type="text" id="fName" name="name" th:value="${name}" placeholder="名称，模糊匹配"/>
+        </div>
+        <div class="filter-item">
+            <label for="fCategory">分类</label>
+            <input type="text" id="fCategory" name="category" th:value="${category}" placeholder="分类，模糊匹配"/>
+        </div>
+        <div class="filter-item">
+            <label for="fLocation">位置</label>
+            <input type="text" id="fLocation" name="location" th:value="${location}" placeholder="位置，模糊匹配"/>
+        </div>
+        <div class="filter-item">
+            <label for="fAddress">ADB 地址</label>
+            <input type="text" id="fAddress" name="address" th:value="${address}" placeholder="如 192.168.1"/>
+        </div>
+        <div class="filter-item">
+            <label for="fStatus">状态</label>
+            <select id="fStatus" name="status">
+                <option value="">全部</option>
+                <option value="ONLINE" th:selected="${status == 'ONLINE'}">ONLINE（在线）</option>
+                <option value="OFFLINE" th:selected="${status == 'OFFLINE'}">OFFLINE（离线）</option>
+                <option value="ERROR" th:selected="${status == 'ERROR'}">ERROR（错误）</option>
+            </select>
+        </div>
+        <div class="filter-item">
+            <label for="sizeSelect">每页</label>
+            <select id="sizeSelect" name="size" onchange="onSizeChange(this)">
                 <option th:each="n : ${sizeOptions}"
                         th:value="${n}"
                         th:text="${n}"
                         th:selected="${n == currentSize}">20</option>
             </select>
-            条
-        </label>
+        </div>
+        <div class="filter-item filter-actions">
+            <button class="btn btn-primary" type="submit">搜索</button>
+            <a class="btn btn-default" th:href="@{/devices(size=${currentSize})}">重置</a>
+        </div>
     </form>
 
     <table class="table">
@@ -124,16 +152,21 @@
             </td>
         </tr>
         <tr th:if="${page.content.empty}">
-            <td colspan="10" class="empty">还没有设备，<a href="/devices/new">立即新建</a></td>
+            <td colspan="10" class="empty">
+                <th:block th:if="${hasFilter}">没有符合条件的设备</th:block>
+                <th:block th:if="${not hasFilter}">还没有设备，<a href="/devices/new">立即新建</a></th:block>
+            </td>
         </tr>
         </tbody>
     </table>
 
     <div class="pager" th:if="${page.totalPages > 1}">
         <span>共 <b th:text="${page.totalElements}">0</b> 台</span>
-        <a th:if="${page.hasPrevious()}" th:href="@{/devices(page=${page.number-1}, size=${currentSize})}">«</a>
+        <a th:if="${page.hasPrevious()}"
+           th:href="@{/devices(page=${page.number-1}, size=${currentSize}, name=${name}, category=${category}, location=${location}, address=${address}, status=${status})}">«</a>
         <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
-        <a th:if="${page.hasNext()}" th:href="@{/devices(page=${page.number+1}, size=${currentSize})}">»</a>
+        <a th:if="${page.hasNext()}"
+           th:href="@{/devices(page=${page.number+1}, size=${currentSize}, name=${name}, category=${category}, location=${location}, address=${address}, status=${status})}">»</a>
     </div>
 </main>
 
@@ -163,7 +196,8 @@
 </div>
 
 <script>
-/* 页面大小选择器：onchange 时记到 localStorage，再提交表单 */
+/* 页面大小选择器（在搜索表单里）：onchange 时记到 localStorage，再提交表单。
+   表单里包含当前搜索条件，所以改每页大小不会丢失过滤条件 */
 function onSizeChange(sel) {
     try { localStorage.setItem('scroff.devicesPageSize', sel.value); } catch (e) {}
     sel.form.submit();

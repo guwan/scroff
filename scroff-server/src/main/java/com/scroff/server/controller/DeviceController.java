@@ -14,7 +14,6 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.validation.BindingResult;
@@ -62,6 +61,11 @@ public class DeviceController {
     @GetMapping
     public String list(@RequestParam(defaultValue = "0") int page,
                        @RequestParam(defaultValue = "20") int size,
+                       @RequestParam(required = false) String name,
+                       @RequestParam(required = false) String category,
+                       @RequestParam(required = false) String location,
+                       @RequestParam(required = false) String address,
+                       @RequestParam(required = false) String status,
                        Model model) {
         // 越界 / 非法值兜底
         if (size < 1 || size > 500 || !PAGE_SIZE_OPTIONS.contains(size)) {
@@ -70,14 +74,42 @@ public class DeviceController {
         if (page < 0) {
             page = 0;
         }
+        // 搜索条件：去首尾空白，空白当 null（不过滤）
+        String n = trimToNull(name);
+        String c = trimToNull(category);
+        String l = trimToNull(location);
+        String a = trimToNull(address);
+        Device.Status st = parseStatus(status);
+
         // 暴露给页面：当前 size、可用选项（用于下拉框）
         model.addAttribute("currentSize", size);
         model.addAttribute("sizeOptions", java.util.List.of(10, 20, 50, 100, 200));
         model.addAttribute("page",
-                deviceRepo.findAll(PageRequest.of(page, size,
-                        Sort.by("sortOrder").ascending()
-                            .and(Sort.by("id").ascending()))));
+                deviceRepo.search(n, c, l, a, st, PageRequest.of(page, size)));
+        // 回显搜索条件（分页链接也要带上）
+        model.addAttribute("name", n);
+        model.addAttribute("category", c);
+        model.addAttribute("location", l);
+        model.addAttribute("address", a);
+        model.addAttribute("status", st != null ? st.name() : null);
+        model.addAttribute("hasFilter", n != null || c != null || l != null || a != null || st != null);
         return "devices";
+    }
+
+    private static String trimToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    /** 状态过滤：非法值忽略（不过滤） */
+    private static Device.Status parseStatus(String status) {
+        if (status == null || status.isBlank()) return null;
+        try {
+            return Device.Status.valueOf(status.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     @GetMapping("/new")

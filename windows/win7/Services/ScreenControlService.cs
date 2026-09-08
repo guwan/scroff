@@ -3,6 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Scroff.Win7.Services
 {
+    /// <summary>
+    /// 屏幕控制服务 - 通过 Windows API 控制屏幕开关
+    /// 返回 ExecutionResult 让上层判断"消息是否成功广播"
+    /// </summary>
     public class ScreenControlService
     {
         // 显示器电源控制
@@ -44,13 +48,31 @@ namespace Scroff.Win7.Services
         private const byte VK_SCROLL = 0x91;
         private const uint KEYEVENTF_KEYUP = 0x0002;
 
-        public void TurnScreenOff()
+        public ExecutionResult TurnScreenOff()
         {
-            // Win7 上 HWND_BROADCAST + SC_MONITORPOWER 不可靠：
-            // 很多顶层窗口不响应广播，必须枚举后逐个发送。
-            // 1) PostMessage 异步广播，2) EnumWindows 同步兜底
-            PostMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_OFF);
-            BroadcastMonitorPower(MONITOR_OFF);
+            try
+            {
+                // Win7 上 HWND_BROADCAST + SC_MONITORPOWER 不可靠：
+                // 很多顶层窗口不响应广播，必须枚举后逐个发送。
+                // 1) PostMessage 异步广播，2) EnumWindows 同步兜底
+                PostMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_OFF);
+                BroadcastMonitorPower(MONITOR_OFF);
+                return new ExecutionResult
+                {
+                    Action = ScheduleAction.ScreenOff,
+                    Success = true,
+                    Message = "已发送关闭指令（PostMessage 广播 + 枚举兜底）"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ExecutionResult
+                {
+                    Action = ScheduleAction.ScreenOff,
+                    Success = false,
+                    Message = ex.GetType().Name + ": " + ex.Message
+                };
+            }
         }
 
         /// <summary>
@@ -60,21 +82,40 @@ namespace Scroff.Win7.Services
         /// 唯一可靠的唤醒手段是模拟"用户活动"输入（触发 DDC 中断），
         /// 然后再发 -1 让 GPU 从省电态恢复。
         /// </summary>
-        public void TurnScreenOn()
+        public ExecutionResult TurnScreenOn()
         {
-            // 1) 先模拟输入（关键）：较大动作的鼠标移动 + SCROLL LOCK 按键
-            //    SCROLL LOCK 是远程唤醒工具的标准键（TeamViewer 等），无副作用
-            mouse_event(MOUSEEVENTF_MOVE, 3, 3, 0, 0);
-            System.Threading.Thread.Sleep(30);
-            mouse_event(MOUSEEVENTF_MOVE, -3, -3, 0, 0);
+            try
+            {
+                // 1) 先模拟输入（关键）：较大动作的鼠标移动 + SCROLL LOCK 按键
+                //    SCROLL LOCK 是远程唤醒工具的标准键（TeamViewer 等），无副作用
+                mouse_event(MOUSEEVENTF_MOVE, 3, 3, 0, 0);
+                System.Threading.Thread.Sleep(30);
+                mouse_event(MOUSEEVENTF_MOVE, -3, -3, 0, 0);
 
-            keybd_event(VK_SCROLL, 0, 0, 0);
-            System.Threading.Thread.Sleep(30);
-            keybd_event(VK_SCROLL, 0, KEYEVENTF_KEYUP, 0);
+                keybd_event(VK_SCROLL, 0, 0, 0);
+                System.Threading.Thread.Sleep(30);
+                keybd_event(VK_SCROLL, 0, KEYEVENTF_KEYUP, 0);
 
-            // 2) 再发 MONITOR_ON 消息兜底：让 GPU 状态从省电恢复
-            PostMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_ON);
-            BroadcastMonitorPower(MONITOR_ON);
+                // 2) 再发 MONITOR_ON 消息兜底：让 GPU 状态从省电恢复
+                PostMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, MONITOR_ON);
+                BroadcastMonitorPower(MONITOR_ON);
+
+                return new ExecutionResult
+                {
+                    Action = ScheduleAction.ScreenOn,
+                    Success = true,
+                    Message = "已发送开启指令（模拟输入 + 广播 + 枚举兜底）"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ExecutionResult
+                {
+                    Action = ScheduleAction.ScreenOn,
+                    Success = false,
+                    Message = ex.GetType().Name + ": " + ex.Message
+                };
+            }
         }
 
         /// <summary>

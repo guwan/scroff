@@ -33,27 +33,53 @@
         </div>
     </div>
 
-    <h2>最近执行</h2>
+    <h2>最近执行
+        <span class="muted" style="font-size:13px; font-weight:normal;">
+            （最近 <th:block th:text="${recentLogs.content.size()}">0</th:block> 条 · 数据源 screen_log 表）
+        </span>
+    </h2>
     <table class="table">
         <thead>
         <tr>
+            <th>ID</th>
             <th>时间</th>
             <th>设备</th>
+            <th>设备地址</th>
             <th>动作</th>
             <th>触发</th>
+            <th>定时任务</th>
+            <th>耗时</th>
             <th>结果</th>
             <th>信息</th>
         </tr>
         </thead>
         <tbody>
         <tr th:each="log : ${recentLogs.content}">
+            <td th:text="${log.id}" class="muted" th:title="${'日志 ID=' + log.id}">--</td>
             <td th:text="${#temporals.format(log.executedAt,'yyyy-MM-dd HH:mm:ss')}">--</td>
             <td th:text="${log.deviceName}">--</td>
+            <td th:text="${log.deviceAddress}" class="muted">--</td>
             <td>
                 <span th:classappend="${log.action.name()=='ON'} ? 'tag tag-on' : 'tag tag-off'"
                       th:text="${log.action}">OFF</span>
             </td>
             <td th:text="${log.triggerType}">--</td>
+            <td>
+                <!-- SCHEDULE 触发时显示来源定时任务；MANUAL/API 留空 -->
+                <span th:if="${log.scheduleId != null}"
+                      class="tag tag-info"
+                      th:title="${'schedule id=' + log.scheduleId + '，cron 见定时任务页'}"
+                      th:text="${log.scheduleName + ' (#' + log.scheduleId + ')'}">schedule</span>
+                <span th:if="${log.scheduleId == null}" class="muted">--</span>
+            </td>
+            <td class="muted">
+                <!-- null 表示老数据没埋点；>=60s 用秒单位更易读 -->
+                <span th:if="${log.durationMs == null}">--</span>
+                <span th:if="${log.durationMs != null and log.durationMs >= 60000}"
+                      th:text="${#numbers.formatInteger(log.durationMs / 1000, 0) + 's'}">0s</span>
+                <span th:if="${log.durationMs != null and log.durationMs < 60000}"
+                      th:text="${log.durationMs + 'ms'}">0ms</span>
+            </td>
             <td>
                 <span th:classappend="${log.success} ? 'tag tag-ok' : 'tag tag-err'"
                       th:text="${log.success} ? '成功' : '失败'">--</span>
@@ -61,7 +87,7 @@
             <td th:text="${log.message}" class="muted">--</td>
         </tr>
         <tr th:if="${recentLogs.content.empty}">
-            <td colspan="6" class="empty">暂无日志</td>
+            <td colspan="10" class="empty">暂无日志</td>
         </tr>
         </tbody>
     </table>

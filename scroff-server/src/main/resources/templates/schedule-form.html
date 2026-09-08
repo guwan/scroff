@@ -14,17 +14,13 @@
         <div class="field">
             <label>名称 *</label>
             <input type="text" th:field="*{name}" required maxlength="100"
-                   placeholder="例：早班开屏 / 晚班关屏">
+                   placeholder="例：早班开屏 / 晚班关屏 / 播放工能课视频">
             <div class="err" th:if="${#fields.hasErrors('name')}" th:errors="*{name}"></div>
         </div>
 
         <div class="field">
             <label>目标 *</label>
             <div class="radio-group">
-                <!--
-                    不依赖 th:field 的隐式 checked 判断（Boolean + 静态 checked 在某些组合下会冲突），
-                    改用 name + th:checked 显式指定，行为完全可控。
-                -->
                 <label class="radio">
                     <input type="radio" name="targetAll" value="false"
                            th:checked="${form.targetAll == null or !form.targetAll}">
@@ -55,10 +51,26 @@
 
         <div class="field">
             <label>动作 *</label>
-            <select th:field="*{action}">
+            <select th:field="*{action}" id="actionSelect">
                 <option value="OFF">关屏</option>
                 <option value="ON">开屏</option>
+                <option value="OPEN_FILE">打开文件</option>
+                <option value="OPEN_APP">打开应用</option>
             </select>
+        </div>
+
+        <!-- 目标路径字段：仅 OPEN_FILE / OPEN_APP 时显示 -->
+        <div class="field" id="targetPathField" style="display:none">
+            <label id="targetPathLabel">目标 *</label>
+            <div style="display:flex; gap:8px;">
+                <input type="text" th:field="*{targetPath}" id="targetPathInput"
+                       maxlength="500" style="flex:1"
+                       placeholder="/sdcard/Movies/example.mp4">
+                <button type="button" class="btn btn-primary" id="browseBtn" style="white-space:nowrap">浏览</button>
+            </div>
+            <small class="hint" id="targetPathHint"></small>
+            <div class="err" th:if="${#fields.hasErrors('targetPath')}" th:errors="*{targetPath}"></div>
+            <div class="err" th:if="${#fields.hasErrors('targetPathValidForAction')}" th:errors="*{targetPathValidForAction}"></div>
         </div>
 
         <div class="field">
@@ -93,16 +105,30 @@
     </form>
 </main>
 
+<!-- ========== 文件浏览 / 应用选择 模态框 ========== -->
+<div id="browserModal" class="modal-overlay" hidden>
+    <div class="modal-box">
+        <h3 class="modal-title" id="browserTitle">浏览文件</h3>
+        <div class="modal-message" id="browserContent">
+            <!-- 动态内容注入 -->
+        </div>
+        <div class="modal-buttons">
+            <button type="button" class="btn" id="browserRefreshBtn">刷新</button>
+            <button type="button" class="btn btn-primary" id="browserSelectBtn" style="display:none">选择此文件</button>
+            <button type="button" class="btn" id="browserCancelBtn">取消</button>
+        </div>
+    </div>
+</div>
+
 <footer th:replace="~{_layout :: footer}"></footer>
 
-<script>
+<script th:inline="javascript">
     /* 单台/全部切换：选中"全部"时隐藏设备下拉框 */
     function updateTargetMode() {
         var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
         var deviceField = document.getElementById('deviceIdField');
         if (allRadio && allRadio.checked) {
             deviceField.style.display = 'none';
-            // 清空下拉框（避免误提交 deviceId 干扰）
             var sel = deviceField.querySelector('select');
             if (sel) sel.value = '';
         } else {
@@ -114,7 +140,7 @@
     });
     updateTargetMode();
 
-    /* 快捷预设按钮：点一下填入 cron 输入框 */
+    /* 快捷预设按钮 */
     document.querySelectorAll('.preset-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var cron = btn.getAttribute('data-cron');
@@ -123,6 +149,266 @@
             input.focus();
         });
     });
+
+    /* ============ 动作切换：显示/隐藏 targetPath 字段 ============ */
+    function updateActionField() {
+        var sel = document.getElementById('actionSelect');
+        var action = sel ? sel.value : '';
+        var pathField = document.getElementById('targetPathField');
+        var pathLabel = document.getElementById('targetPathLabel');
+        var pathHint = document.getElementById('targetPathHint');
+        var browseBtn = document.getElementById('browseBtn');
+        var browseTitle = document.getElementById('browserTitle');
+
+        if (action === 'OPEN_FILE') {
+            pathField.style.display = '';
+            pathLabel.textContent = '文件路径 *';
+            pathHint.textContent = 'Android 设备上的文件路径，如 /sdcard/Movies/demo.mp4。支持视频 / 图片 / 文档等。';
+            browseBtn.textContent = '浏览文件';
+            browseTitle.textContent = '浏览设备文件';
+        } else if (action === 'OPEN_APP') {
+            pathField.style.display = '';
+            pathLabel.textContent = '应用包名或 Component *';
+            pathHint.textContent = '如 com.example.app 或 com.example.app/.MainActivity。留 component 更精准。';
+            browseBtn.textContent = '浏览应用';
+            browseTitle.textContent = '选择已安装应用';
+        } else {
+            pathField.style.display = 'none';
+        }
+    }
+    document.getElementById('actionSelect').addEventListener('change', updateActionField);
+    // 初始状态也触发一次（编辑时从服务器渲染的值）
+    updateActionField();
+
+    /* ============ 浏览模态框 ============ */
+    var browserModal = document.getElementById('browserModal');
+    var browserContent = document.getElementById('browserContent');
+    var browserSelectBtn = document.getElementById('browserSelectBtn');
+    var browserRefreshBtn = document.getElementById('browserRefreshBtn');
+    var currentActionMode = 'OPEN_FILE'; // 'OPEN_FILE' 或 'OPEN_APP'
+    var currentBrowsePath = '/sdcard';
+
+    function openBrowser() {
+        var sel = document.getElementById('actionSelect');
+        currentActionMode = sel.value;
+
+        // 单台模式下直接用选中的设备；全部模式时让用户先选一台
+        var allRadio = document.querySelector('input[name="targetAll"][value="true"]');
+        var isAllMode = allRadio && allRadio.checked;
+
+        if (isAllMode) {
+            alert('浏览功能需要先指定一台具体设备。请切换到"单台设备"模式并选择设备后再浏览。');
+            return;
+        }
+
+        var deviceSel = document.getElementById('deviceIdField').querySelector('select');
+        var deviceId = deviceSel.value;
+        if (!deviceId) {
+            alert('请先在上方选择一台设备');
+            return;
+        }
+
+        browserModal.hidden = false;
+        if (currentActionMode === 'OPEN_APP') {
+            loadPackages(deviceId);
+        } else {
+            // 如果 targetPath 已有值，从该目录开始
+            var existing = document.getElementById('targetPathInput').value;
+            currentBrowsePath = extractDir(existing) || '/sdcard';
+            loadDir(deviceId, currentBrowsePath);
+        }
+    }
+
+    function closeBrowser() {
+        browserModal.hidden = true;
+    }
+
+    browserModal.addEventListener('click', function (e) {
+        if (e.target === browserModal) closeBrowser();
+    });
+    document.getElementById('browserCancelBtn').addEventListener('click', closeBrowser);
+    browserRefreshBtn.addEventListener('click', function () {
+        var deviceSel = document.getElementById('deviceIdField').querySelector('select');
+        var deviceId = deviceSel.value;
+        if (deviceId) {
+            if (currentActionMode === 'OPEN_APP') loadPackages(deviceId);
+            else loadDir(deviceId, currentBrowsePath);
+        }
+    });
+
+    /* 从已有路径里提取目录部分 */
+    function extractDir(p) {
+        if (!p) return null;
+        // 去掉末尾文件名，保留目录
+        var idx = p.lastIndexOf('/');
+        if (idx <= 0) return '/sdcard';
+        return p.substring(0, idx) || '/';
+    }
+
+    /* ============ 文件浏览 ============ */
+    function loadDir(deviceId, path) {
+        currentBrowsePath = path;
+        browserContent.innerHTML = '<div class="muted">加载中...</div>';
+        browserSelectBtn.style.display = 'none';
+
+        fetch('/api/devices/' + deviceId + '/browse?path=' + encodeURIComponent(path))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                renderFileBrowser(data, deviceId);
+            })
+            .catch(function (e) {
+                browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>';
+            });
+    }
+
+    function renderFileBrowser(data, deviceId) {
+        if (!data.ok) {
+            browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>';
+            return;
+        }
+
+        var html = '';
+        // 面包屑导航
+        html += '<div style="margin-bottom:10px;font-size:13px;color:#666;">';
+        html += '<strong>当前：</strong>' + escapeHtml(data.path) + ' → ';
+        if (data.parentPath && data.parentPath !== data.path) {
+            html += '<a href="javascript:void(0)" data-path="' + escapeHtmlAttr(data.parentPath) + '" class="nav-up">↑ 上一级</a>';
+        }
+        html += '</div>';
+
+        if (!data.entries || data.entries.length === 0) {
+            html += '<div class="muted" style="text-align:center;padding:30px;">目录为空</div>';
+        } else {
+            html += '<table><thead><tr><th style="width:24px"></th><th>名称</th><th style="width:80px">类型</th></tr></thead><tbody>';
+            data.entries.forEach(function (e) {
+                var icon = e.isDir ? '📁' : getFileIcon(e.extension);
+                var rowClass = e.isDir ? ' class="dir-row"' : ' class="file-row"';
+                html += '<tr' + rowClass + ' data-name="' + escapeHtmlAttr(e.name) + '" data-isdir="' + e.isDir + '">';
+                html += '<td>' + icon + '</td>';
+                html += '<td>' + escapeHtml(e.name) + '</td>';
+                html += '<td class="muted">' + (e.isDir ? '目录' : (e.extension || '-')) + '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        browserContent.innerHTML = html;
+
+        // 绑定点击事件
+        browserContent.querySelectorAll('.nav-up').forEach(function (a) {
+            a.addEventListener('click', function () {
+                loadDir(deviceId, a.getAttribute('data-path'));
+            });
+        });
+        browserContent.querySelectorAll('.dir-row').forEach(function (row) {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function () {
+                var name = row.getAttribute('data-name');
+                var newPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
+                loadDir(deviceId, newPath);
+            });
+        });
+        browserContent.querySelectorAll('.file-row').forEach(function (row) {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function () {
+                var name = row.getAttribute('data-name');
+                var fullPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
+                document.getElementById('targetPathInput').value = fullPath;
+                closeBrowser();
+            });
+            row.addEventListener('dblclick', function () {
+                var name = row.getAttribute('data-name');
+                var fullPath = (currentBrowsePath === '/' ? '/' : currentBrowsePath + '/') + name;
+                document.getElementById('targetPathInput').value = fullPath;
+                closeBrowser();
+            });
+        });
+    }
+
+    function getFileIcon(ext) {
+        if (!ext) return '📄';
+        ext = ext.toLowerCase();
+        if (['mp4', '3gp', 'mkv', 'avi', 'mov', 'wmv', 'ts'].includes(ext)) return '🎬';
+        if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return '🖼️';
+        if (['mp3', 'wav', 'flac', 'aac'].includes(ext)) return '🎵';
+        if (['txt', 'log', 'md'].includes(ext)) return '📄';
+        if (['pdf'].includes(ext)) return '📕';
+        if (['apk'].includes(ext)) return '📦';
+        return '📄';
+    }
+
+    /* ============ 应用浏览 ============ */
+    function loadPackages(deviceId) {
+        browserContent.innerHTML = '<div class="muted">加载中...</div>';
+        browserSelectBtn.style.display = 'none';
+
+        fetch('/api/devices/' + deviceId + '/packages')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                renderPackageList(data);
+            })
+            .catch(function (e) {
+                browserContent.innerHTML = '<div class="err">加载失败: ' + e.message + '</div>';
+            });
+    }
+
+    function renderPackageList(data) {
+        if (!data.ok) {
+            browserContent.innerHTML = '<div class="err">' + (data.error || '未知错误') + '</div>';
+            return;
+        }
+        var pkgs = data.packages || [];
+        var html = '<div style="margin-bottom:10px;">';
+        html += '<input type="text" id="pkgSearch" placeholder="输入包名过滤..." style="width:100%;padding:6px 10px;border:1px solid var(--c-border);border-radius:4px;font-size:13px;">';
+        html += '</div>';
+        html += '<table><thead><tr><th>包名</th></tr></thead><tbody id="pkgListBody">';
+        pkgs.forEach(function (p) {
+            html += '<tr class="pkg-row" data-pkg="' + escapeHtmlAttr(p.package) + '">';
+            html += '<td style="cursor:pointer;">📦 ' + escapeHtml(p.package) + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        browserContent.innerHTML = html;
+
+        // 搜索过滤
+        var search = document.getElementById('pkgSearch');
+        search.addEventListener('input', function () {
+            var kw = search.value.toLowerCase();
+            var rows = browserContent.querySelectorAll('.pkg-row');
+            rows.forEach(function (r) {
+                var pkg = r.getAttribute('data-pkg').toLowerCase();
+                r.style.display = (pkg.indexOf(kw) >= 0) ? '' : 'none';
+            });
+        });
+        search.focus();
+
+        // 点击选择
+        browserContent.querySelectorAll('.pkg-row').forEach(function (row) {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function () {
+                var pkg = row.getAttribute('data-pkg');
+                document.getElementById('targetPathInput').value = pkg;
+                closeBrowser();
+            });
+        });
+    }
+
+    /* ============ 工具函数 ============ */
+    function escapeHtml(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>]/g, function (c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];
+        });
+    }
+    function escapeHtmlAttr(s) {
+        if (s == null) return '';
+        return String(s).replace(/[&<>"]/g, function (c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+        });
+    }
+
+    /* ============ 浏览按钮触发 ============ */
+    document.getElementById('browseBtn').addEventListener('click', openBrowser);
 </script>
 </body>
 </html>

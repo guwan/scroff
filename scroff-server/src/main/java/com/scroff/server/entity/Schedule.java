@@ -21,7 +21,14 @@ import java.time.LocalDateTime;
 public class Schedule {
 
     public enum Action {
-        ON, OFF
+        /** 开屏 */
+        ON,
+        /** 关屏 */
+        OFF,
+        /** 打开指定文件（如视频 mp4），targetPath 存 Android 文件路径 */
+        OPEN_FILE,
+        /** 打开指定应用程序，targetPath 存包名或 component（如 com.example.app/.MainActivity） */
+        OPEN_APP
     }
 
     public enum LastRunStatus {
@@ -39,8 +46,17 @@ public class Schedule {
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 10)
+    @Column(nullable = false, length = 20)
     private Action action;
+
+    /**
+     * 动作目标路径/标识。
+     * ON/OFF 时为 null；
+     * OPEN_FILE 时存 Android 文件路径（如 /sdcard/Movies/gongnengke.mp4）；
+     * OPEN_APP 时存包名或 component（如 com.example.app/.MainActivity 或 com.example.app）。
+     */
+    @Column(name = "target_path", length = 500)
+    private String targetPath;
 
     /** Spring cron：秒 分 时 日 月 周 [年] */
     @Column(nullable = false, length = 50)

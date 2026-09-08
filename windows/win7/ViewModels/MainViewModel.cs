@@ -2,17 +2,47 @@ using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using Scroff.Win7.Services;
 
+// 同时引入 WinForms + WPF 时消除 Application 歧义
+using Application = System.Windows.Application;
+
 namespace Scroff.Win7.ViewModels
 {
     public class MainViewModel : INotifyPropertyChanged
     {
+        /// <summary>历史记录最大条数（与 StorageService 保持一致）</summary>
+        private const int MaxHistoryEntries = 500;
+
         private readonly SchedulerService _scheduler;
         private readonly StorageService _storage;
+
+        /// <summary>暴露给 App 层，让 NetworkMonitorService 复用同一个 StorageService 实例</summary>
+        public StorageService Storage { get { return _storage; } }
+
+        /// <summary>软件版本号，从 InformationalVersionAttribute 读取（配置在 csproj 的 &lt;InformationalVersion&gt;）</summary>
+        public string AppVersion
+        {
+            get
+            {
+                try
+                {
+                    var v = Assembly.GetExecutingAssembly()
+                        .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+                    return v != null && !string.IsNullOrEmpty(v.InformationalVersion)
+                        ? v.InformationalVersion
+                        : "未知版本";
+                }
+                catch
+                {
+                    return "未知版本";
+                }
+            }
+        }
 
         private string _newScheduleName = "";
         private TimeSpan _newScheduleTime = new TimeSpan(7, 50, 0);
@@ -83,12 +113,20 @@ namespace Scroff.Win7.ViewModels
 
         public ObservableCollection<ScheduleItem> Schedules { get { return _scheduler.Schedules; } }
 
+        /// <summary>
+        /// 屏幕控制历史记录（最新在前）
+        /// </summary>
+        public ObservableCollection<HistoryEntry> History { get; } = new ObservableCollection<HistoryEntry>();
+
         public ICommand AddScheduleCommand { get; }
         public ICommand EditScheduleCommand { get; }
         public ICommand CancelEditCommand { get; }
         public ICommand DeleteScheduleCommand { get; }
         public ICommand ExecuteScheduleCommand { get; }
         public ICommand ToggleEnabledCommand { get; }
+        public ICommand TurnOffNowCommand { get; }
+        public ICommand TurnOnNowCommand { get; }
+        public ICommand ClearHistoryCommand { get; }
 
         public MainViewModel()
         {
@@ -97,6 +135,16 @@ namespace Scroff.Win7.ViewModels
 
             // 加载已保存的任务
             foreach (var item in _storage.Load()) _scheduler.AddSchedule(item);
+
+            // 加载历史记录（最新在前）
+            var historyLoaded = _storage.LoadHistory();
+            for (int i = historyLoaded.Count - 1; i >= 0; i--)
+            {
+                History.Add(historyLoaded[i]);
+            }
+
+            // 订阅屏幕控制执行完毕事件，写入历史
+            _scheduler.Executed += OnScheduleExecuted;
 
             // 首次运行：注入默认任务并启用开机自启
             if (_storage.IsFirstRun)
@@ -114,6 +162,66 @@ namespace Scroff.Win7.ViewModels
             DeleteScheduleCommand = new RelayCommand(p => DeleteSchedule(p as ScheduleItem));
             ExecuteScheduleCommand = new RelayCommand(p => ExecuteSchedule(p as ScheduleItem));
             ToggleEnabledCommand = new RelayCommand(p => ToggleEnabled(p as ScheduleItem));
+            TurnOffNowCommand = new RelayCommand(_ => TurnOffNow());
+            TurnOnNowCommand = new RelayCommand(_ => TurnOnNow());
+            ClearHistoryCommand = new RelayCommand(_ => ClearHistory());
+        }
+
+        private void OnScheduleExecuted(HistorySource source, ScheduleAction action,
+            string scheduleName, bool success, string message)
+        {
+            var entry = new HistoryEntry
+            {
+                Id = DateTime.Now.Ticks,
+                Timestamp = DateTime.Now,
+                Action = action,
+                Source = source,
+                ScheduleName = scheduleName,
+                Success = success,
+                Message = message
+            };
+
+            var app = Application.Current;
+            if (app != null)
+            {
+                app.Dispatcher.Invoke(new Action(() =>
+                {
+                    History.Insert(0, entry);
+                    while (History.Count > MaxHistoryEntries)
+                    {
+                        History.RemoveAt(History.Count - 1);
+                    }
+                }));
+            }
+            else
+            {
+                History.Insert(0, entry);
+            }
+
+            _storage.AppendHistory(entry);
+        }
+
+        /// <summary>
+        /// 网络事件回调（由 NetworkMonitorService 在 App 层 Dispatcher 内调用）：
+        /// 往 UI History 集合前插一条（持久化由 NetworkMonitorService 内部完成）
+        /// </summary>
+        public void OnNetworkEvent(ScheduleAction action, string message)
+        {
+            var entry = new HistoryEntry
+            {
+                Id = DateTime.Now.Ticks,
+                Timestamp = DateTime.Now,
+                Action = action,
+                Source = HistorySource.Network,
+                ScheduleName = null,
+                Success = action != ScheduleAction.NetworkReconnectFailed,
+                Message = message
+            };
+            History.Insert(0, entry);
+            while (History.Count > MaxHistoryEntries)
+            {
+                History.RemoveAt(History.Count - 1);
+            }
         }
 
         /// <summary>
@@ -218,6 +326,25 @@ namespace Scroff.Win7.ViewModels
             if (newValue) _scheduler.EnableSchedule(schedule);
             else _scheduler.DisableSchedule(schedule);
             SaveSchedules();
+        }
+
+        /// <summary>手动立即关屏（托盘菜单用）</summary>
+        public void TurnOffNow()
+        {
+            _scheduler.Execute(ScheduleAction.ScreenOff, HistorySource.Manual, null);
+        }
+
+        /// <summary>手动立即开屏（托盘菜单用）</summary>
+        public void TurnOnNow()
+        {
+            _scheduler.Execute(ScheduleAction.ScreenOn, HistorySource.Manual, null);
+        }
+
+        /// <summary>清空历史记录</summary>
+        public void ClearHistory()
+        {
+            History.Clear();
+            _storage.ClearHistory();
         }
 
         private void SaveSchedules()

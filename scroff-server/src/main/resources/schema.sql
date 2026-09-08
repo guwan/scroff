@@ -41,10 +41,11 @@ CREATE TABLE `schedule` (
     `id`               BIGINT       NOT NULL AUTO_INCREMENT,
     `device_id`        BIGINT       NOT NULL DEFAULT 0 COMMENT '单台模式=实际设备ID；所有设备模式=0（哨兵）',
     `name`             VARCHAR(100) NOT NULL COMMENT '业务名（"晚间关屏"）',
-    `action`           VARCHAR(10)  NOT NULL COMMENT 'OFF / ON',
+    `action`           VARCHAR(20)  NOT NULL COMMENT 'OFF / ON / OPEN_FILE / OPEN_APP',
     `cron`             VARCHAR(50)  NOT NULL COMMENT 'Spring 6 字段 cron：秒 分 时 日 月 周',
     `enabled`          TINYINT(1)   NOT NULL DEFAULT 1,
     `target_all`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '0=单台（按 device_id）；1=所有设备（device_id 忽略）',
+    `target_path`      VARCHAR(500)          DEFAULT NULL COMMENT 'OPEN_FILE/OPEN_APP 的目标路径或包名',
     `last_run_at`      TIMESTAMP    NULL DEFAULT NULL,
     `last_run_status`  VARCHAR(20)           DEFAULT NULL COMMENT 'SUCCESS / FAILED',
     `last_run_message` VARCHAR(500)          DEFAULT NULL,
@@ -64,17 +65,22 @@ CREATE TABLE `schedule` (
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS `screen_log`;
 CREATE TABLE `screen_log` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-    `device_id`     BIGINT       NOT NULL,
-    `device_name`   VARCHAR(100) NOT NULL COMMENT '冗余存储，避免 device 改名后日志看不懂',
-    `action`        VARCHAR(10)  NOT NULL COMMENT 'OFF / ON',
-    `trigger_type`  VARCHAR(20)  NOT NULL COMMENT 'SCHEDULE / MANUAL / API',
-    `success`       TINYINT(1)   NOT NULL,
-    `message`       VARCHAR(1000)         DEFAULT NULL,
-    `executed_at`   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `device_id`      BIGINT       NOT NULL,
+    `device_name`    VARCHAR(100) NOT NULL COMMENT '冗余存储，避免 device 改名后日志看不懂',
+    `device_address` VARCHAR(100)          DEFAULT NULL COMMENT '冗余 host:port，便于同名设备区分',
+    `action`         VARCHAR(20)  NOT NULL COMMENT 'OFF / ON / OPEN_FILE / OPEN_APP',
+    `trigger_type`   VARCHAR(20)  NOT NULL COMMENT 'SCHEDULE / MANUAL / API',
+    `schedule_id`    BIGINT                DEFAULT NULL COMMENT 'SCHEDULE 触发时关联的 schedule.id',
+    `schedule_name`  VARCHAR(100)          DEFAULT NULL COMMENT '冗余 schedule 当时的名字',
+    `success`        TINYINT(1)   NOT NULL,
+    `message`        VARCHAR(1000)         DEFAULT NULL,
+    `duration_ms`    INT                  DEFAULT NULL COMMENT '执行 adb 命令耗时（毫秒）',
+    `executed_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_log_device_time` (`device_id`, `executed_at`),
-    KEY `idx_log_time` (`executed_at`)
+    KEY `idx_log_time` (`executed_at`),
+    KEY `idx_log_schedule` (`schedule_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='屏幕控制执行日志';
 
 -- ------------------------------------------------------------

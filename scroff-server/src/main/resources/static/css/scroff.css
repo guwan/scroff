@@ -591,8 +591,53 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
 }
 .pager a { padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 4px; }
 
-/* ===== Filter ===== */
-.filter select { padding: 5px 10px; border: 1px solid var(--c-border); border-radius: 4px; background: white; }
+/* ===== 列表页搜索条件表单（devices / logs） ===== */
+.filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    align-items: flex-end;
+    background: var(--c-card);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+}
+.filter-form .filter-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.filter-form label {
+    font-size: 12px;
+    color: var(--c-muted);
+    font-weight: 500;
+}
+.filter-form input[type="text"],
+.filter-form input[type="datetime-local"],
+.filter-form select {
+    width: 170px;
+    padding: 5px 8px;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    background: white;
+    font-size: 13px;
+    font-family: inherit;
+}
+.filter-form input[type="datetime-local"] { width: 195px; }
+.filter-form input:focus,
+.filter-form select:focus {
+    outline: none;
+    border-color: var(--c-primary);
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+}
+.filter-form .filter-actions {
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+    margin-left: auto;
+}
 
 /* ===== Footer ===== */
 .footer {

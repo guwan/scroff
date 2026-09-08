@@ -4,9 +4,15 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- 启用 WinForms 以便使用 NotifyIcon 实现系统托盘功能 -->
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>Scroff</RootNamespace>
     <AssemblyName>Scroff</AssemblyName>
-    <Version>1.0.0</Version>
+    <!-- 软件版本号：UI 通过 AssemblyInformationalVersionAttribute 读取 InformationalVersion -->
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.1-win10</InformationalVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationIcon>Assets\scroff.ico</ApplicationIcon>

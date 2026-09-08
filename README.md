@@ -476,6 +476,78 @@ sudo systemctl start scroff-server
 
 `build-win7.ps1` 通过微软官方的 `vswhere` 自动定位 MSBuild，能跨盘符/版本找到 Visual Studio 2019/2022 或 Build Tools。
 
+### 打包与发布
+
+**Win10 / Win11 64-bit（.NET 8）**
+
+```powershell
+# 依赖型发布：体积小（~5MB），但目标机器需装 .NET 8 Desktop Runtime
+.\build-win10.ps1
+
+# 自包含发布：把 .NET 8 运行时一起打包（~150MB），目标机器无需任何依赖
+.\build-win10.ps1 -SelfContained $true
+
+# 32 位版本（少见，仅在需要时用）
+.\build-win10.ps1 -Rid win-x86
+```
+
+产物目录：`windows\publish\`
+
+| 模式 | 必带的文件（拷贝到目标机器整个目录） | 目标机器要求 |
+|------|--------------------------------|--------------|
+| 依赖型（默认，**~340KB**） | `Scroff.exe`、`Scroff.dll`、`Scroff.deps.json`、`Scroff.runtimeconfig.json`、`CommunityToolkit.Mvvm.dll` | 已装 [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) |
+| 自包含（**~150MB**） | 整个 `publish\` 目录 | 无任何要求 |
+
+> 自包含模式首次跑会因 Windows SmartScreen 弹"未知发布者"警告，右键 → 属性 → 勾选"解除锁定"或选"仍要运行"即可。
+>
+> `Scroff.pdb`（调试符号）和 `debug.log`（运行时日志）是开发用，**分发时可以不拷**，不影响运行。
+
+**Win7 / Win8 / Win10 32-bit（.NET Framework 4.8）**
+
+```powershell
+.\build-win7.ps1                 # 默认 Release | x86
+.\build-win7.ps1 -Configuration Debug
+```
+
+产物目录：`windows\win7\bin\Release\`
+
+| 必带的文件 | 目标机器要求 |
+|------------|--------------|
+| `Scroff.exe`、`Newtonsoft.Json.dll` | 系统已装 .NET Framework 4.8（Win 10 1903+ / Win 11 自带，Win 7 SP1 需手动装 [KB4503548](https://www.microsoft.com/zh-cn/download/details.aspx?id=56116)） |
+
+### 怎么选？跑哪个 exe？
+
+| 目标 Windows | 跑哪个 | 来源 |
+|--------------|--------|------|
+| **Windows 11**（任意 64-bit） | `windows\publish\Scroff.exe` | `build-win10.ps1` |
+| **Windows 10** 64-bit | `windows\publish\Scroff.exe` | `build-win10.ps1` |
+| **Windows 10** 32-bit | `windows\publish\Scroff.exe`（加 `-Rid win-x86`） | `build-win10.ps1 -Rid win-x86` |
+| **Windows 8.1 / 8** | `windows\win7\bin\Release\Scroff.exe` | `build-win7.ps1` |
+| **Windows 7 SP1** | `windows\win7\bin\Release\Scroff.exe` | `build-win7.ps1` |
+
+**分发方式**：
+
+1. 把对应**整个目录**压缩成 zip（`Scroff-Win10-x64.zip` / `Scroff-Win7-x86.zip`）
+2. 解压到目标机器任意目录，比如 `C:\Scroff\`
+3. 双击 `Scroff.exe` 即可
+4. 用户数据存在 `%AppData%\Scroff\`（`schedules.json` / `history.json` / `settings.json`），**和 exe 目录解耦**，升级版本直接覆盖 exe 目录即可，不会丢任务
+
+> **不要把 exe 目录放到 `C:\Program Files\`**——写 `settings.json` / `schedules.json` 时会因权限失败。
+
+### 单文件发布（可选，Win10/11 自包含基础上再加一步）
+
+如果想要一个 exe 就走天下（绿色单文件，~150MB），改 csproj 启用单文件发布：
+
+```xml
+<!-- windows/Scroff/Scroff.csproj 加这两个 PropertyGroup -->
+<PublishSingleFile>true</PublishSingleFile>
+<SelfContained>true</SelfContained>
+<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+```
+
+然后跑 `.\build-win10.ps1 -SelfContained $true`，产物只剩一个 `Scroff.exe`（首次运行会自解压到临时目录，有 1-2 秒延迟）。
+
 ### 屏幕控制实现
 
 Win32 API `SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, ...)`：
