@@ -85,14 +85,7 @@
         </tbody>
     </table>
 
-    <div th:replace="~{_pagination :: pager(
-        page=${page},
-        baseUrl=${pagerBase},
-        qs=${pagerQs},
-        displayPages=${pagerDisplay},
-        showLeftEllipsis=${pagerShowLeft},
-        showRightEllipsis=${pagerShowRight}
-    )}"></div>
+    <div th:replace="~{_pagination :: pager(page=${page}, baseUrl=${pagerBase})}"></div>
 </main>
 
 <footer th:replace="~{_layout :: footer}"></footer>
