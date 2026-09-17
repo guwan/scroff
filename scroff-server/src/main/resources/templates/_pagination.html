@@ -1,0 +1,111 @@
+<!--
+  通用分页组件 fragment
+  用法（在模板里）:
+    <div th:replace="~{_pagination :: pager(
+        page=${page},
+        baseUrl='/devices',
+        qs=${pagerQs},
+        displayPages=${pagerDisplay},
+        showLeftEllipsis=${pagerShowLeft},
+        showRightEllipsis=${pagerShowRight}
+    )}"></div>
+
+  参数:
+    page             - Spring Data Page 对象（必填）
+    baseUrl          - 列表页 URL 前缀，如 "/devices"（必填）
+    qs               - 其他查询参数（已经 URL encode 过的），如 "name=abc&size=20&status=ONLINE"
+                       （可选，可为空/NULL；不要包含 page=，fragment 自己拼）
+    displayPages     - List<Integer>，0-based 页号，由 Controller 算好要显示的页码
+                       （不含首尾页，首尾固定显示）
+    showLeftEllipsis - boolean，首页和 displayPages 起点之间是否显示省略号
+    showRightEllipsis- boolean，displayPages 终点和末页之间是否显示省略号
+-->
+<html xmlns:th="http://www.thymeleaf.org" th:fragment="pager(page, baseUrl, qs, displayPages, showLeftEllipsis, showRightEllipsis)">
+<body>
+
+<div class="pager" th:if="${page != null and page.totalPages > 1}">
+
+    <!-- 左：统计信息 -->
+    <div class="pager-info">
+        共 <b th:text="${page.totalElements}">0</b> 条，
+        第 <b th:text="${page.number + 1}">1</b>/<b th:text="${page.totalPages}">1</b> 页
+        <span class="pager-range"
+              th:text="'（' + ${page.number * page.size + 1} + '-' + ${T(java.lang.Math).min((page.number + 1) * page.size, page.totalElements)} + '）'"></span>
+    </div>
+
+    <!-- 右：页码按钮 -->
+    <div class="pager-buttons">
+
+        <!-- 首页 -->
+        <a class="pg-btn"
+           th:classappend="${page.number == 0} ? 'pg-disabled'"
+           th:href="@{${baseUrl}(page=0)} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')">«</a>
+
+        <!-- 上一页 -->
+        <a class="pg-btn"
+           th:if="${page.hasPrevious()}"
+           th:href="@{${baseUrl}(page=${page.number - 1})} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')">‹</a>
+        <span class="pg-btn pg-disabled" th:if="${!page.hasPrevious()}">‹</span>
+
+        <!-- 首页（除了已经是首页） -->
+        <a class="pg-btn"
+           th:if="${page.totalPages > 1}"
+           th:classappend="${0 == page.number} ? 'pg-active'"
+           th:href="@{${baseUrl}(page=0)} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')">1</a>
+
+        <!-- 左省略号 -->
+        <span class="pg-ellipsis" th:if="${showLeftEllipsis != null and showLeftEllipsis}">…</span>
+
+        <!-- 中间页码（Controller 已算好） -->
+        <a class="pg-btn"
+           th:each="p : ${displayPages}"
+           th:classappend="${p == page.number} ? 'pg-active'"
+           th:href="@{${baseUrl}(page=${p})} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')"
+           th:text="${p + 1}">2</a>
+
+        <!-- 右省略号 -->
+        <span class="pg-ellipsis" th:if="${showRightEllipsis != null and showRightEllipsis}">…</span>
+
+        <!-- 末页（除了只有一页的情况） -->
+        <a class="pg-btn"
+           th:if="${page.totalPages > 1}"
+           th:classappend="${page.totalPages - 1 == page.number} ? 'pg-active'"
+           th:href="@{${baseUrl}(page=${page.totalPages - 1})} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')"
+           th:text="${page.totalPages}">10</a>
+
+        <!-- 下一页 -->
+        <a class="pg-btn"
+           th:if="${page.hasNext()}"
+           th:href="@{${baseUrl}(page=${page.number + 1})} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')">›</a>
+        <span class="pg-btn pg-disabled" th:if="${!page.hasNext()}">›</span>
+
+        <!-- 末页（跳用） -->
+        <a class="pg-btn"
+           th:classappend="${page.number == page.totalPages - 1} ? 'pg-disabled'"
+           th:href="@{${baseUrl}(page=${page.totalPages - 1})} + (${qs} != null and !${qs.isEmpty()} ? '&' + ${qs} : '')">»</a>
+    </div>
+
+    <!-- 跳页 -->
+    <form class="pager-jump" th:action="${baseUrl}" method="get">
+        <!-- page 由下方 input[type=number] 提供；其他过滤条件从 qs 拆分而来 -->
+        <th:block th:if="${qs != null and !qs.isEmpty()}">
+            <th:block th:each="pair : ${#strings.split(qs, '&')}">
+                <th:block th:if="${pair != null and !pair.isEmpty()}">
+                    <input type="hidden" th:name="${#strings.substringBefore(pair, '=')}"
+                           th:value="${#strings.substringAfter(pair, '=')}"/>
+                </th:block>
+            </th:block>
+        </th:block>
+        <label>跳至
+            <input type="number" name="page" min="1"
+                   th:max="${page.totalPages}"
+                   th:attr="value=${page.number + 1}"
+                   class="pg-jump-input"/>
+            页
+        </label>
+        <button type="submit" class="btn btn-sm">Go</button>
+    </form>
+</div>
+
+</body>
+</html>

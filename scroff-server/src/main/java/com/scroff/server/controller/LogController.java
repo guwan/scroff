@@ -3,6 +3,7 @@ package com.scroff.server.controller;
 import com.scroff.server.entity.ScreenLog;
 import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.repository.ScreenLogRepository;
+import com.scroff.server.util.PagerHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
@@ -58,8 +59,14 @@ public class LogController {
         LocalDateTime from = parseDateTime(startTime);
         LocalDateTime to = parseDateTime(endTime);
 
-        model.addAttribute("page", logRepo.search(
-                deviceId, dn, act, ipN, c, l, from, to, PageRequest.of(page, size)));
+        var resultPage = logRepo.search(
+                deviceId, dn, act, ipN, c, l, from, to, PageRequest.of(page, size));
+        PagerHelper.prepare(resultPage, model.asMap(), "/logs",
+                "deviceId", deviceId, "deviceName", dn,
+                "action", act != null ? act.name() : null,
+                "ip", ipN, "category", c, "location", l,
+                "startTime", startTime, "endTime", endTime,
+                "size", size);
 
         // 回显搜索条件（分页链接也要带上）
         model.addAttribute("selectedDeviceId", deviceId);

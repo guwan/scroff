@@ -5,6 +5,7 @@ import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.service.DeviceManager;
 import com.scroff.server.service.ScreenPowerService;
 import com.scroff.server.entity.ScreenLog;
+import com.scroff.server.util.PagerHelper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -84,9 +85,14 @@ public class DeviceController {
         // 暴露给页面：当前 size、可用选项（用于下拉框）
         model.addAttribute("currentSize", size);
         model.addAttribute("sizeOptions", java.util.List.of(10, 20, 50, 100, 200));
-        model.addAttribute("page",
-                deviceRepo.search(n, c, l, a, st, PageRequest.of(page, size)));
-        // 回显搜索条件（分页链接也要带上）
+
+        var resultPage = deviceRepo.search(n, c, l, a, st, PageRequest.of(page, size));
+        // 准备分页 fragment 要用的所有属性（pagerBase / pagerQs / pagerDisplay / pagerShowLeft / pagerShowRight）
+        PagerHelper.prepare(resultPage, model.asMap(), "/devices",
+                "name", n, "category", c, "location", l, "address", a,
+                "status", st != null ? st.name() : null, "size", size);
+
+        // 回显搜索条件（page 已由 prepare 处理）
         model.addAttribute("name", n);
         model.addAttribute("category", c);
         model.addAttribute("location", l);

@@ -164,6 +164,21 @@
     });
     updateTargetMode();
 
+    /* ============ Cron 预设按钮：仅当输入框为空时才填入 ============ */
+    document.querySelectorAll('.preset-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var cronInput = document.getElementById('cronInput');
+            if (cronInput.value.trim() === '') {
+                cronInput.value = btn.getAttribute('data-cron');
+                cronInput.focus();
+            } else {
+                // 已有值：给个轻量提示，不覆盖
+                btn.style.opacity = '0.5';
+                setTimeout(function () { btn.style.opacity = ''; }, 300);
+            }
+        });
+    });
+
     /* ============ 多选控件逻辑 ============ */
     var MultiSelect = (function () {
         var selectedIds = new Set(initialDeviceIds);

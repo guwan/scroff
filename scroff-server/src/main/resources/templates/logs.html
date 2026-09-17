@@ -118,14 +118,14 @@
         </tbody>
     </table>
 
-    <div class="pager" th:if="${page.totalPages > 1}">
-        <span>共 <b th:text="${page.totalElements}">0</b> 条</span>
-        <a th:if="${page.hasPrevious()}"
-           th:href="@{/logs(page=${page.number-1}, deviceId=${selectedDeviceId}, deviceName=${deviceName}, action=${action}, ip=${ip}, category=${category}, location=${location}, startTime=${fromStr}, endTime=${toStr})}">«</a>
-        <span>第 <b th:text="${page.number+1}">1</b> / <b th:text="${page.totalPages}">1</b> 页</span>
-        <a th:if="${page.hasNext()}"
-           th:href="@{/logs(page=${page.number+1}, deviceId=${selectedDeviceId}, deviceName=${deviceName}, action=${action}, ip=${ip}, category=${category}, location=${location}, startTime=${fromStr}, endTime=${toStr})}">»</a>
-    </div>
+    <div th:replace="~{_pagination :: pager(
+        page=${page},
+        baseUrl=${pagerBase},
+        qs=${pagerQs},
+        displayPages=${pagerDisplay},
+        showLeftEllipsis=${pagerShowLeft},
+        showRightEllipsis=${pagerShowRight}
+    )}"></div>
 </main>
 
 <footer th:replace="~{_layout :: footer}"></footer>

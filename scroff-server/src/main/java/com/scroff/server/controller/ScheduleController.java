@@ -5,6 +5,7 @@ import com.scroff.server.repository.DeviceRepository;
 import com.scroff.server.repository.ScheduleRepository;
 import com.scroff.server.scheduler.ScheduleExecutor;
 import com.scroff.server.service.ScreenPowerService;
+import com.scroff.server.util.PagerHelper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
@@ -52,7 +53,7 @@ public class ScheduleController {
                        @RequestParam(defaultValue = "20") int size,
                        Model model) {
         var pageResult = scheduleRepo.findAll(PageRequest.of(page, size, Sort.by("id").ascending()));
-        model.addAttribute("page", pageResult);
+        PagerHelper.prepare(pageResult, model.asMap(), "/schedules", "size", size);
 
         // 给每个 schedule 计算 deviceName 展示：所有设备模式 → "所有设备"；指定设备模式 → 用 getDeviceIdList() 拼名字
         Map<Long, String> deviceNamesForSchedule = new LinkedHashMap<>();

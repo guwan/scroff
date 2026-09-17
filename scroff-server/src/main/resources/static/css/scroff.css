@@ -230,7 +230,7 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
     border: 1px solid #ddd;
     border-radius: 4px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-    z-index: 50;
+    z-index: 1000;  /* 表格/弹窗等常见容器 z-index 远低于这个，确保不会被盖住 */
     padding: 4px 0;
     font-size: 13px;
 }
@@ -435,10 +435,18 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
     background: var(--c-card);
     border: 1px solid var(--c-border);
     border-radius: var(--radius);
-    border-collapse: collapse;
-    overflow: hidden;
+    border-collapse: separate;          /* 用 separate 避免 overflow: hidden + border-radius 在 tbody 上截下拉 */
+    border-spacing: 0;
+    /* overflow: hidden 会让表格里的 dropdown-menu / tooltip 被截断；
+       改成 visible 后圆角效果丢失，给外层 tr 也没好办法，
+       折中：保留 border-radius 在外层 box-shadow，允许溢出显示 */
     box-shadow: var(--shadow);
 }
+.table tbody tr td {
+    /* 操作列单元格本身不能 overflow hidden，否则下拉会被截断 */
+    overflow: visible;
+}
+.table td.actions { overflow: visible; position: relative; }
 .table th, .table td {
     padding: 10px 12px;
     text-align: left;
@@ -581,15 +589,92 @@ h2 { font-size: 17px; margin: 30px 0 12px; color: #374151; }
 
 /* ===== Pager ===== */
 .pager {
-    margin-top: 16px;
-    text-align: center;
-    color: var(--c-muted);
+    margin-top: 20px;
     display: flex;
-    justify-content: center;
+    flex-wrap: wrap;
     gap: 16px;
+    justify-content: space-between;
     align-items: center;
+    padding: 14px 18px;
+    background: var(--c-card);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    color: var(--c-muted);
+    font-size: 13px;
 }
-.pager a { padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 4px; }
+.pager-info b { color: var(--c-text); font-weight: 600; }
+.pager-range { color: #9ca3af; margin-left: 2px; }
+
+.pager-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.pg-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--c-text);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s ease;
+    box-sizing: border-box;
+    line-height: 1;
+}
+.pg-btn:hover:not(.pg-disabled):not(.pg-active) {
+    border-color: var(--c-primary);
+    color: var(--c-primary);
+    background: #f0f7ff;
+}
+.pg-btn.pg-active {
+    background: var(--c-primary);
+    color: #fff;
+    border-color: var(--c-primary);
+    font-weight: 600;
+}
+.pg-btn.pg-disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.pg-ellipsis {
+    color: #9ca3af;
+    padding: 0 4px;
+    user-select: none;
+    font-size: 14px;
+}
+
+.pager-jump {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--c-muted);
+    font-size: 13px;
+}
+.pg-jump-input {
+    width: 56px;
+    height: 30px;
+    padding: 0 6px;
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+}
+.pg-jump-input:focus {
+    border-color: var(--c-primary);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+}
 
 /* ===== 列表页搜索条件表单（devices / logs） ===== */
 .filter-form {
